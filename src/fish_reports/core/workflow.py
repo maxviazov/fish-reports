@@ -191,11 +191,16 @@ class FishReportsWorkflow:
         if not self.file_processor.convert_to_kilograms():
             self._log_error("Ошибка при конвертации весов")
             return False
-        
-        # Log filtering results
+
+        # Group data by base document and sum values
+        if not self.file_processor.group_by_base_document():
+            self._log_error("Ошибка при группировке данных")
+            return False
+
+        # Log processing results
         if self.file_processor.filtered_data is not None:
-            filtered_rows = len(self.file_processor.filtered_data)
-            self._log_info(f"После фильтрации осталось строк: {filtered_rows}")
+            processed_rows = len(self.file_processor.filtered_data)
+            self._log_info(f"После обработки осталось строк: {processed_rows}")
         
         return True
     
