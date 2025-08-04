@@ -4,7 +4,7 @@ File utility functions.
 
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 import logging
 
 
