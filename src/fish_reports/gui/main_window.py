@@ -6,6 +6,16 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 from typing import Optional
+import logging
+
+from fish_reports.core.workflow import FishReportsWorkflow
+
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 
 class FishReportsApp:
@@ -18,10 +28,13 @@ class FishReportsApp:
         self.root.geometry("800x600")
         
         # Directory paths
-        self.source_dir: Optional[Path] = None
+        self.source_file: Optional[Path] = None
         self.intermediate_dir: Optional[Path] = None
         self.reports_dir: Optional[Path] = None
         self.output_dir: Optional[Path] = None
+        
+        # Workflow
+        self.workflow = FishReportsWorkflow(gui_callback=self._log_message)
         
         self._create_widgets()
         self._setup_layout()
@@ -243,7 +256,7 @@ class FishReportsApp:
         )
         if filename:
             self.source_var.set(filename)
-            self.source_dir = Path(filename)
+            self.source_file = Path(filename)
             self._log_message(f"Выбран исходный файл: {filename}")
             self._check_ready()
     
@@ -283,7 +296,7 @@ class FishReportsApp:
     def _check_ready(self):
         """Check if all directories are selected and enable processing."""
         if all([
-            self.source_dir,
+            self.source_file,
             self.intermediate_dir,
             self.reports_dir,
             self.output_dir
@@ -295,20 +308,70 @@ class FishReportsApp:
     
     def _start_processing(self):
         """Start the processing workflow."""
-        self._log_message("Начинаем обработку файлов...")
-        self.progress_var.set("Обработка...")
-        self.progress_bar.start()
-        
-        # TODO: Implement actual processing
-        # For now, just show a placeholder message
-        self.root.after(2000, self._finish_processing)
+        try:
+            # Validate all paths are set
+            if not all([self.source_file, self.intermediate_dir, self.reports_dir, self.output_dir]):
+                messagebox.showerror("Ошибка", "Не все пути выбраны")
+                return
+            
+            self._log_message("Начинаем обработку файлов...")
+            self.progress_var.set("Настройка обработки...")
+            self.progress_bar.start()
+            
+            # Disable the process button to prevent multiple runs
+            self.process_button.configure(state="disabled")
+            
+            # Set up workflow paths
+            if not all([self.source_file, self.intermediate_dir, self.reports_dir, self.output_dir]):
+                self._log_message("ОШИБКА: Не все пути установлены")
+                self._finish_processing(False)
+                return
+                
+            success = self.workflow.set_paths(
+                self.source_file,  # type: ignore
+                self.intermediate_dir,  # type: ignore
+                self.reports_dir,  # type: ignore
+                self.output_dir  # type: ignore
+            )
+            
+            if not success:
+                self._finish_processing(False)
+                return
+            
+            # Start processing asynchronously
+            self.workflow.process_files_async(self._finish_processing)
+            
+        except Exception as e:
+            self._log_message(f"ОШИБКА: {e}")
+            self._finish_processing(False)
     
-    def _finish_processing(self):
+    def _finish_processing(self, success: bool):
         """Finish processing and show results."""
         self.progress_bar.stop()
-        self.progress_var.set("Обработка завершена")
-        self._log_message("Обработка файлов завершена!")
-        messagebox.showinfo("Готово", "Обработка файлов завершена успешно!")
+        self.process_button.configure(state="normal")
+        
+        if success:
+            self.progress_var.set("Обработка завершена успешно")
+            self._log_message("Обработка файлов завершена успешно!")
+            
+            # Show results summary
+            results = self.workflow.get_results()
+            if results:
+                summary = f"""Результаты обработки:
+• Обработано строк: {results.get('total_rows', 0)}
+• Общий вес (кг): {results.get('total_weight_kg', 0):.2f}
+• Общее количество упаковок: {results.get('total_packages', 0)}
+• Найдено лицензий: {results.get('unique_licenses', 0)}
+• Скопировано файлов отчетов: {results.get('total_files', 0)}
+
+Результаты сохранены в: {results.get('output_directory', '')}"""
+                messagebox.showinfo("Обработка завершена", summary)
+            else:
+                messagebox.showinfo("Готово", "Обработка файлов завершена успешно!")
+        else:
+            self.progress_var.set("Ошибка при обработке")
+            self._log_message("Обработка завершена с ошибками!")
+            messagebox.showerror("Ошибка", "Произошла ошибка при обработке файлов. Проверьте лог для деталей.")
     
     def _clear_log(self):
         """Clear the log text."""
