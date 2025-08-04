@@ -3,7 +3,9 @@
 ## Быстрый старт
 
 ### 1. Подготовка окружения
-```bash
+
+**Для PowerShell:**
+```powershell
 # Перейти в папку проекта
 cd c:\Users\office3\Documents\Project\fish-reports-dolina
 
@@ -11,7 +13,13 @@ cd c:\Users\office3\Documents\Project\fish-reports-dolina
 .\venv\Scripts\activate
 
 # Запустить приложение
-python -m src.fish_reports
+cd src
+python -m fish_reports
+```
+
+**Альтернативный способ (одной командой):**
+```powershell
+cd src ; python -m fish_reports
 ```
 
 ### 2. Тестирование с готовыми данными

@@ -106,7 +106,16 @@ Test results:
 - ✅ Документация готова
 - ✅ Примеры данных подготовлены
 
-**Команда запуска**: `cd src && python -m fish_reports`
+**Команда запуска**: 
+```powershell
+cd src
+python -m fish_reports
+```
+
+Или одной командой:
+```powershell
+cd src ; python -m fish_reports
+```
 
 ---
 *Обновлено: 04 августа 2025 г.*  
