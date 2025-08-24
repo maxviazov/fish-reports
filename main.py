@@ -16,13 +16,13 @@ def main():
     """Главная функция запуска."""
     try:
         from fish_reports.gui.main_window import FishReportsApp
-        
+
         print("🐟 Запуск Fish Reports System...")
         print("=" * 40)
-        
+
         app = FishReportsApp()
         app.run()
-        
+
     except ImportError as e:
         print(f"❌ Ошибка импорта: {e}")
         print("Убедитесь, что все зависимости установлены:")
