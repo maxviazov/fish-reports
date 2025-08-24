@@ -183,3 +183,6 @@ temp/
 *.xls
 *.csv
 !sample_data.*
+
+# Exception: include source code files in src/
+!src/**/*.py
