@@ -7,11 +7,9 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 import threading
 
-from fish_reports.data.file_processor import FileProcessor
-from fish_reports.data.report_manager import ReportManager
-from fish_reports.utils.file_utils import (
-    validate_file_path, create_directory_if_not_exists
-)
+from ..data.file_processor import FileProcessor
+from ..data.report_manager import ReportManager
+from ..utils.file_utils import validate_file_path, create_directory_if_not_exists
 
 
 logger = logging.getLogger(__name__)
@@ -234,19 +232,43 @@ class FishReportsWorkflow:
             return True
         
         self._log_info(f"Ищем отчеты для {len(business_licenses)} лицензий...")
-        
-        # Search for reports
-        found_reports = self.report_manager.search_reports_by_license(business_licenses)
-        
+
+        # First try searching by content (more accurate)
+        self._log_info("Поиск отчетов по содержимому файлов...")
+        found_reports = self.report_manager.search_reports_by_content(business_licenses)
+
+        # If no reports found by content, fallback to filename search
+        if not found_reports:
+            self._log_info("Поиск отчетов по имени файла...")
+            found_reports = self.report_manager.search_reports_by_license(
+                business_licenses
+            )
+
         if not found_reports:
             self._log_warning("Не найдено ни одного отчета")
             return True
-        
-        # Copy found reports
-        if not self.report_manager.copy_reports_to_output():
+
+        # Copy found reports with data replacement (if intermediate file available)
+        intermediate_file = None
+        if self.intermediate_dir:
+            intermediate_file_path = self.intermediate_dir / "filtered_data.xlsx"
+            if intermediate_file_path.exists():
+                intermediate_file = intermediate_file_path
+                self._log_info("Копирование отчетов с одновременной заменой данных...")
+            else:
+                self._log_info(
+                    "Копирование отчетов без замены данных (промежуточный файл не найден)..."
+                )
+        else:
+            self._log_info("Копирование отчетов без замены данных...")
+
+        if not self.report_manager.copy_reports_to_output(intermediate_file):
             self._log_error("Ошибка при копировании отчетов")
             return False
-        
+
+        # Log detailed statistics
+        self.report_manager.log_detailed_statistics()
+
         self._log_info(f"Скопировано отчетов для {len(found_reports)} лицензий")
         return True
     
@@ -276,6 +298,15 @@ class FishReportsWorkflow:
             self._log_info(f"Общее количество упаковок: {stats.get('total_packages', 0)}")
             self._log_info(f"Найдено лицензий: {stats.get('unique_licenses', 0)}")
             self._log_info(f"Скопировано файлов отчетов: {copy_stats.get('total_files', 0)}")
+
+            # Add detailed distribution info if available
+            if copy_stats.get("total_files", 0) > 0:
+                avg_files = copy_stats.get("avg_files_per_license", 0)
+                min_files = copy_stats.get("min_files_per_license", 0)
+                max_files = copy_stats.get("max_files_per_license", 0)
+                self._log_info(f"Среднее файлов на лицензию: {avg_files}")
+                self._log_info(f"Диапазон файлов: {min_files} - {max_files}")
+
             self._log_info("=" * 50)
             
         except Exception as e:
