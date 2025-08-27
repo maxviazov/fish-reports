@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import openpyxl
 import pandas as pd
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +298,9 @@ class ReportManager:
         # Mapping from intermediate file fields to final report fields
         logger.info(f"Данные для замены: {replacement_data}")
 
+        # Получаем текущую дату в формате dd.mm.yy
+        current_date = datetime.now().strftime('%d.%m.%y')
+
         field_replacements = [
             # אסמכתת בסיס -> מספר תעודת משלוח
             {
@@ -318,6 +322,13 @@ class ReportManager:
                 'target_column': 'סה"כ קרטונים',
                 'replace_value': replacement_data.get('סה\'כ אריזות', replacement_data.get('סהכ אריזות', 0)),
                 'is_numeric': True  # Это числовое поле
+            },
+            # תאריך -> תאריך (текущая дата)
+            {
+                'intermediate_field': 'current_date',
+                'target_column': 'תאריך',
+                'replace_value': current_date,
+                'is_numeric': False  # Это текстовое поле
             }
         ]
 
