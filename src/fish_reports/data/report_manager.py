@@ -282,6 +282,38 @@ class ReportManager:
 
         return field_mappings
 
+    def _get_weight_value(self, replacement_data: Dict) -> float:
+        """
+        Get weight value from replacement data with proper handling of missing/zero values.
+
+        Args:
+            replacement_data: Dictionary with replacement values
+
+        Returns:
+            Weight value as float, 0 if missing or invalid
+        """
+        # Try different variations of weight field name
+        weight_keys = ['סה\'כ משקל', 'סהכ משקל', 'סה"כ משקל', 'סהכ משקל']
+
+        for key in weight_keys:
+            if key in replacement_data:
+                value = replacement_data[key]
+                try:
+                    # Convert to float, handling various formats
+                    if pd.isna(value) or value is None or str(value).strip() == '':
+                        continue
+                    numeric_value = float(value)
+                    if numeric_value >= 0:  # Accept zero and positive values
+                        logger.info(f"Найдено значение веса '{key}': {numeric_value}")
+                        return numeric_value
+                except (ValueError, TypeError):
+                    logger.warning(f"Не удалось преобразовать значение веса '{value}' в число")
+                    continue
+
+        # If no valid weight found, return 0
+        logger.info("Значение веса не найдено или равно 0, будет установлено значение 0")
+        return 0.0
+
     def _replace_fields_in_worksheet(self, worksheet, replacement_data: Dict, field_mappings: Dict[str, str]):
         """
         Replace fields in a single worksheet.
@@ -314,8 +346,9 @@ class ReportManager:
             {
                 'intermediate_field': 'סה\'כ משקל',
                 'target_column': 'מוצרים מוכנים לאכילה',
-                'replace_value': replacement_data.get('סה\'כ משקל', replacement_data.get('סהכ משקל', 0)),
-                'is_numeric': True  # Это числовое поле
+                'replace_value': self._get_weight_value(replacement_data),
+                'is_numeric': True,  # Это числовое поле
+                'force_replace': True  # Всегда заменять значение, даже если оно равно 0
             },
             # סה'כ אריזות -> סה"כ קרטונים
             {
@@ -408,8 +441,21 @@ class ReportManager:
                             break
 
                         cell = worksheet.cell(row=data_row_idx, column=col_idx)
-                        if cell.value is not None:
-                            old_value = cell.value
+                        if cell.value is not None or replacement.get('force_replace', False):
+                            old_value = cell.value if cell.value is not None else ''
+
+                            # Специальная обработка для поля веса - всегда проверяем на "חסרים משקלים"
+                            if target_col == 'מוצרים מוכנים לאכילה' and str(old_value).strip() in ['חסרים משקלים', 'חסרים משקלים']:
+                                # Принудительно заменяем "חסרים משקלים" на числовое значение
+                                try:
+                                    numeric_value = float(replacement['replace_value']) if replacement['replace_value'] != '' else 0.0
+                                    cell.value = numeric_value
+                                    logger.info(f"Принудительно заменено 'חסרים משקלים' на {numeric_value} (число) в поле веса")
+                                    replacements_made += 1
+                                    break
+                                except (ValueError, TypeError):
+                                    logger.warning(f"Не удалось преобразовать значение веса '{replacement['replace_value']}' в число")
+                                    continue
 
                             # Сохраняем значение с правильным типом данных
                             if replacement.get('is_formula', False):
@@ -420,12 +466,42 @@ class ReportManager:
                                 # Устанавливаем формат ячейки для правильного отображения даты
                                 cell.number_format = 'DD.MM.YYYY'  # Формат даты для Excel
                                 logger.info(f"Установлена текущая дата в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): {current_date.strftime('%d.%m.%Y')}")
-                            elif replacement['is_numeric'] and replacement['replace_value'] != '':
+                            elif replacement['is_numeric'] and (replacement['replace_value'] != '' or replacement.get('force_replace', False)):
                                 try:
-                                    # Преобразуем в число
-                                    numeric_value = float(replacement['replace_value'])
-                                    cell.value = numeric_value
-                                    logger.info(f"Заменено в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{old_value}' -> {numeric_value} (число)")
+                                    # Преобразуем в число (для force_replace используем 0 если значение пустое)
+                                    if replacement['replace_value'] != '':
+                                        numeric_value = float(replacement['replace_value'])
+                                    else:
+                                        numeric_value = 0.0
+
+                                    # Специальная обработка для поля веса - проверяем, есть ли в ячейке текст "חסרים משקלים"
+                                    if target_col == 'מוצרים מוכנים לאכילה':
+                                        # Для поля веса всегда заменяем значение, особенно если там "חסרים משקלים"
+                                        if str(old_value).strip() in ['חסרים משקלים', 'חסרים משקלים', '0', '', 'None', 'nan', 'NaN']:
+                                            cell.value = numeric_value
+                                            logger.info(f"Заменено поле веса с '{old_value}' на {numeric_value} (число) - специальный текст")
+                                        elif replacement.get('force_replace', False):
+                                            # Принудительная замена для всех значений
+                                            cell.value = numeric_value
+                                            logger.info(f"Принудительно заменено поле веса с '{old_value}' на {numeric_value} (число)")
+                                        elif numeric_value > 0:
+                                            # Для положительных значений устанавливаем как обычно
+                                            cell.value = numeric_value
+                                            logger.info(f"Заменено в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{old_value}' -> {numeric_value} (число)")
+                                        else:
+                                            # Для нулевых значений проверяем, нужно ли заменять
+                                            if str(old_value).strip() in ['חסרים משקלים', 'חסרים משקלים', '']:
+                                                cell.value = numeric_value
+                                                logger.info(f"Заменено нулевое значение веса с '{old_value}' на {numeric_value} (число)")
+                                            else:
+                                                logger.info(f"Пропущено нулевое значение веса - в ячейке уже есть значение: '{old_value}'")
+                                    elif numeric_value > 0:
+                                        # Для других числовых полей устанавливаем только положительные значения
+                                        cell.value = numeric_value
+                                        logger.info(f"Заменено в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{old_value}' -> {numeric_value} (число)")
+                                    else:
+                                        logger.info(f"Пропущено нулевое значение в столбце '{target_col}' - оставлено: '{old_value}'")
+
                                 except (ValueError, TypeError) as e:
                                     logger.warning(f"Не удалось преобразовать '{replacement['replace_value']}' в число: {e}")
                                     cell.value = replacement['replace_value']
