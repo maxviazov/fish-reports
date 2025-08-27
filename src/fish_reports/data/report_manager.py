@@ -6,7 +6,8 @@ import logging
 import os
 import re
 import shutil
-# from datetime import datetime  # Больше не используется, заменено на формулу Excel
+
+# from datetime import datetime  # Импорт внутри функции для избежания предупреждений линтера
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -323,13 +324,13 @@ class ReportManager:
                 'replace_value': replacement_data.get('סה\'כ אריזות', replacement_data.get('סהכ אריזות', 0)),
                 'is_numeric': True  # Это числовое поле
             },
-            # תאריך -> תאריך (формула =TODAY() для автоматического обновления даты)
+            # תאריך -> תאריך (текущая дата с правильным форматом)
             {
                 'intermediate_field': 'current_date_formula',
                 'target_column': 'תאריך',
-                'replace_value': '=TODAY()',  # Формула Excel для текущей даты
-                'is_numeric': False,  # Это формула, не числовое значение
-                'is_formula': True  # Флаг, что это формула
+                'replace_value': 'PLACEHOLDER_DATE',  # Будет заменено на текущую дату
+                'is_numeric': False,  # Это дата, не число
+                'is_formula': True  # Флаг для специальной обработки даты
             }
         ]
 
@@ -412,9 +413,13 @@ class ReportManager:
 
                             # Сохраняем значение с правильным типом данных
                             if replacement.get('is_formula', False):
-                                # Для формул устанавливаем значение напрямую
-                                cell.value = replacement['replace_value']
-                                logger.info(f"Установлена формула в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{replacement['replace_value']}'")
+                                # Для формулы TODAY() вычисляем текущую дату и устанавливаем как значение
+                                from datetime import datetime
+                                current_date = datetime.now().date()  # Получаем текущую дату как объект date
+                                cell.value = current_date
+                                # Устанавливаем формат ячейки для правильного отображения даты
+                                cell.number_format = 'DD.MM.YYYY'  # Формат даты для Excel
+                                logger.info(f"Установлена текущая дата в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): {current_date.strftime('%d.%m.%Y')}")
                             elif replacement['is_numeric'] and replacement['replace_value'] != '':
                                 try:
                                     # Преобразуем в число
