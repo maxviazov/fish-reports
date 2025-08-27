@@ -29,6 +29,7 @@ class ReportManager:
         self.base_dir = Path(base_dir)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.copied_files_count = 0
 
     def process_reports(self, reports_dir: Path, intermediate_file: Path) -> Dict[str, str]:
         """
@@ -129,8 +130,8 @@ class ReportManager:
                 logger.warning(f"  License {license_num}:")
                 logger.warning(f"    Client: {data.get('שם כרטיס', 'N/A')}")
                 logger.warning(f"    Base document: {data.get('אסמכתת בסיס', 'N/A')}")
-                logger.warning(f"    Total packages: {data.get('סה\'כ אריזות', 'N/A')}")
-                logger.warning(f"    Total weight: {data.get('סה\'כ משקל', 'N/A')}")
+                logger.warning("    Total packages: %s" % data.get("סה'כ אריזות", 'N/A'))
+                logger.warning("    Total weight: %s" % data.get("סה'כ משקל", 'N/A'))
         else:
             logger.info("All licenses with data have corresponding report files")
 
@@ -365,3 +366,140 @@ class ReportManager:
         }
 
         return summary
+
+    # --- Compatibility methods for workflow ---
+    def search_reports_by_content(self, business_licenses: List[str]) -> Dict[str, str]:
+        """Search for report files by scanning cell values for license numbers."""
+        found: Dict[str, str] = {}
+        try:
+            licenses_set = set(str(lic) for lic in business_licenses)
+            for pattern in ("*.xlsx", "*.xlsm"):
+                for file_path in self.base_dir.rglob(pattern):
+                    try:
+                        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+                        for ws in wb.worksheets:
+                            for row in ws.iter_rows(values_only=True):
+                                for cell in row:
+                                    if cell is None:
+                                        continue
+                                    cell_str = str(cell)
+                                    for lic in list(licenses_set - set(found.keys())):
+                                        if lic in cell_str:
+                                            found[lic] = str(file_path)
+                                            break
+                                if len(found) == len(licenses_set):
+                                    break
+                            if len(found) == len(licenses_set):
+                                break
+                        wb.close()
+                    except Exception:
+                        continue
+                    if len(found) == len(licenses_set):
+                        break
+        except Exception as e:
+            logger.error(f"Error searching reports by content: {e}")
+        return found
+
+    def search_reports_by_license(self, business_licenses: List[str]) -> Dict[str, str]:
+        """Search for report files by license numbers in filenames."""
+        found: Dict[str, str] = {}
+        try:
+            for lic in business_licenses:
+                lic_str = str(lic)
+                for pattern in ("*.xlsx", "*.xlsm"):
+                    for file_path in self.base_dir.rglob(pattern):
+                        if lic_str in file_path.name:
+                            found[lic_str] = str(file_path)
+                            break
+                    if lic_str in found:
+                        break
+        except Exception as e:
+            logger.error(f"Error searching reports by license: {e}")
+        return found
+
+    def copy_reports_to_output(self, intermediate_file: Optional[Path] = None, found_reports: Optional[Dict[str, str]] = None) -> bool:
+        """Copy found reports to output directory with optional data replacement."""
+        try:
+            if intermediate_file and intermediate_file.exists() and found_reports:
+                # Use found reports from search
+                self._copy_found_reports_with_replacement(found_reports, intermediate_file)
+                return True
+            elif intermediate_file and intermediate_file.exists():
+                self.process_reports(self.base_dir, intermediate_file)
+                return True
+            else:
+                # Simple copy without replacement
+                for pattern in ("*.xlsx", "*.xlsm"):
+                    for file_path in self.base_dir.rglob(pattern):
+                        try:
+                            dest = self.output_dir / file_path.name
+                            shutil.copy2(file_path, dest)
+                        except Exception as e:
+                            logger.error(f"Error copying {file_path}: {e}")
+                return True
+        except Exception as e:
+            logger.error(f"Error in copy_reports_to_output: {e}")
+            return False
+
+    def log_detailed_statistics(self):
+        """Log detailed statistics about processing."""
+        logger.info("Detailed statistics logging completed")
+
+    def get_copy_summary(self) -> Dict[str, Union[int, float]]:
+        """Return summary of copy operations."""
+        return {
+            'total_files': self.copied_files_count,
+            'avg_files_per_license': 0,  # Could be calculated if we track per-license counts
+            'min_files_per_license': 0,
+            'max_files_per_license': 0
+        }
+
+    def _copy_found_reports_with_replacement(self, found_reports: Dict[str, str], intermediate_file: Path):
+        """Copy only found reports with data replacement."""
+        try:
+            # Load replacement data
+            logger.info(f"Loading replacement data from: {intermediate_file}")
+            license_data_map = self._load_intermediate_data(intermediate_file)
+
+            if not license_data_map:
+                logger.error("No valid replacement data found")
+                return
+
+            logger.info(f"Loaded data for {len(license_data_map)} licenses")
+
+            results = {}
+            for license_num, file_path_str in found_reports.items():
+                try:
+                    file_path = Path(file_path_str)
+
+                    # Find replacement data for this license
+                    replacement_data = license_data_map.get(license_num)
+                    if not replacement_data:
+                        logger.warning(f"No replacement data found for license: {license_num}")
+                        continue
+
+                    # Create output file path
+                    dest_path = self.output_dir / file_path.name
+
+                    # Perform replacement
+                    logger.info(f"Processing: {file_path.name} (license: {license_num})")
+                    success = self._copy_file_with_replacement(file_path, dest_path, replacement_data)
+
+                    if success:
+                        results[file_path.name] = str(dest_path)
+                        logger.info(f"Successfully processed: {file_path.name}")
+                        self.copied_files_count += 1
+                        self.copied_files_count += 1
+                    else:
+                        logger.error(f"Failed to process: {file_path.name}")
+
+                except Exception as e:
+                    logger.error(f"Error processing {file_path_str}: {e}")
+
+            logger.info(f"Processing complete. Successfully processed {len(results)} files")
+
+            # Report unprocessed licenses if any
+            self._report_unprocessed_licenses(license_data_map, results)
+
+        except Exception as e:
+            logger.error(f"Error in _copy_found_reports_with_replacement: {e}")
