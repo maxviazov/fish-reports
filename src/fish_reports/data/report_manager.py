@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import shutil
-from datetime import datetime
+# from datetime import datetime  # Больше не используется, заменено на формулу Excel
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -298,8 +298,8 @@ class ReportManager:
         # Mapping from intermediate file fields to final report fields
         logger.info(f"Данные для замены: {replacement_data}")
 
-        # Получаем текущую дату в формате dd.mm.yy
-        current_date = datetime.now().strftime('%d.%m.%y')
+        # Получаем текущую дату в формате dd.mm.yy (больше не используется, заменено на формулу)
+        # current_date = datetime.now().strftime('%d.%m.%y')
 
         field_replacements = [
             # אסמכתת בסיס -> מספר תעודת משלוח
@@ -323,12 +323,13 @@ class ReportManager:
                 'replace_value': replacement_data.get('סה\'כ אריזות', replacement_data.get('סהכ אריזות', 0)),
                 'is_numeric': True  # Это числовое поле
             },
-            # תאריך -> תאריך (текущая дата)
+            # תאריך -> תאריך (формула =TODAY() для автоматического обновления даты)
             {
-                'intermediate_field': 'current_date',
+                'intermediate_field': 'current_date_formula',
                 'target_column': 'תאריך',
-                'replace_value': current_date,
-                'is_numeric': False  # Это текстовое поле
+                'replace_value': '=TODAY()',  # Формула Excel для текущей даты
+                'is_numeric': False,  # Это формула, не числовое значение
+                'is_formula': True  # Флаг, что это формула
             }
         ]
 
@@ -410,7 +411,11 @@ class ReportManager:
                             old_value = cell.value
 
                             # Сохраняем значение с правильным типом данных
-                            if replacement['is_numeric'] and replacement['replace_value'] != '':
+                            if replacement.get('is_formula', False):
+                                # Для формул устанавливаем значение напрямую
+                                cell.value = replacement['replace_value']
+                                logger.info(f"Установлена формула в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{replacement['replace_value']}'")
+                            elif replacement['is_numeric'] and replacement['replace_value'] != '':
                                 try:
                                     # Преобразуем в число
                                     numeric_value = float(replacement['replace_value'])
