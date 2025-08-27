@@ -174,6 +174,9 @@ cython_debug/
 ehthumbs.db
 Thumbs.db
 
+# Exception: include source code files in src/
+!src/**/*.py
+
 # Project specific
 data/
 reports/
@@ -183,6 +186,3 @@ temp/
 *.xls
 *.csv
 !sample_data.*
-
-# Exception: include source code files in src/
-!src/**/*.py
