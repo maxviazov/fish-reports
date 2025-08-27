@@ -3,13 +3,12 @@ Report management utilities for Fish Reports processing.
 """
 
 import logging
-import os
 import re
 import shutil
 
 # from datetime import datetime  # Импорт внутри функции для избежания предупреждений линтера
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import openpyxl
 import pandas as pd
@@ -450,6 +449,9 @@ class ReportManager:
                                 try:
                                     numeric_value = float(replacement['replace_value']) if replacement['replace_value'] != '' else 0.0
                                     cell.value = numeric_value
+                                    # Устанавливаем формат ячейки как числовой
+                                    cell.number_format = '0.00'  # Числовой формат с 2 знаками после запятой
+                                    cell.data_type = 'n'  # Явно указываем тип данных как число
                                     logger.info(f"Принудительно заменено 'חסרים משקלים' на {numeric_value} (число) в поле веса")
                                     replacements_made += 1
                                     break
@@ -479,25 +481,80 @@ class ReportManager:
                                         # Для поля веса всегда заменяем значение, особенно если там "חסרים משקלים"
                                         if str(old_value).strip() in ['חסרים משקלים', 'חסרים משקלים', '0', '', 'None', 'nan', 'NaN']:
                                             cell.value = numeric_value
+                                            # Устанавливаем формат ячейки как числовой для поля веса
+                                            cell.number_format = '0.00'  # Числовой формат с 2 знаками после запятой
+                                            cell.data_type = 'n'  # Явно указываем тип данных как число
                                             logger.info(f"Заменено поле веса с '{old_value}' на {numeric_value} (число) - специальный текст")
                                         elif replacement.get('force_replace', False):
                                             # Принудительная замена для всех значений
                                             cell.value = numeric_value
+                                            # Устанавливаем формат ячейки как числовой для поля веса
+                                            cell.number_format = '0.00'  # Числовой формат с 2 знаками после запятой
+                                            cell.data_type = 'n'  # Явно указываем тип данных как число
                                             logger.info(f"Принудительно заменено поле веса с '{old_value}' на {numeric_value} (число)")
                                         elif numeric_value > 0:
                                             # Для положительных значений устанавливаем как обычно
                                             cell.value = numeric_value
+                                            # Устанавливаем формат ячейки как числовой для поля веса
+                                            cell.number_format = '0.00'  # Числовой формат с 2 знаками после запятой
+                                            cell.data_type = 'n'  # Явно указываем тип данных как число
                                             logger.info(f"Заменено в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{old_value}' -> {numeric_value} (число)")
                                         else:
                                             # Для нулевых значений проверяем, нужно ли заменять
                                             if str(old_value).strip() in ['חסרים משקלים', 'חסרים משקלים', '']:
                                                 cell.value = numeric_value
+                                                # Устанавливаем формат ячейки как числовой для поля веса
+                                                cell.number_format = '0.00'  # Числовой формат с 2 знаками после запятой
+                                                cell.data_type = 'n'  # Явно указываем тип данных как число
                                                 logger.info(f"Заменено нулевое значение веса с '{old_value}' на {numeric_value} (число)")
                                             else:
                                                 logger.info(f"Пропущено нулевое значение веса - в ячейке уже есть значение: '{old_value}'")
+                                    # Специальная обработка для поля количества (аризות)
+                                    elif target_col == 'סה"כ קרטונים':
+                                        # Для поля количества всегда заменяем значение, особенно если там специальные тексты
+                                        if str(old_value).strip() in ['חסרים משקלים', 'חסרים משקלים', '0', '', 'None', 'nan', 'NaN', 'חסרים אריזות', 'חסרים קרטונים']:
+                                            cell.value = numeric_value
+                                            # Устанавливаем формат ячейки как числовой для поля количества
+                                            cell.number_format = '0.00'  # Формат с 2 знаками после запятой для количества
+                                            cell.data_type = 'n'  # Явно указываем тип данных как число
+                                            logger.info(f"Заменено поле количества с '{old_value}' на {numeric_value} (число) - специальный текст")
+                                        elif replacement.get('force_replace', False):
+                                            # Принудительная замена для всех значений
+                                            cell.value = numeric_value
+                                            # Устанавливаем формат ячейки как числовой для поля количества
+                                            cell.number_format = '0.00'  # Формат с 2 знаками после запятой для количества
+                                            cell.data_type = 'n'  # Явно указываем тип данных как число
+                                            logger.info(f"Принудительно заменено поле количества с '{old_value}' на {numeric_value} (число)")
+                                        elif numeric_value > 0:
+                                            # Для положительных значений устанавливаем как обычно
+                                            cell.value = numeric_value
+                                            # Устанавливаем формат ячейки как числовой для поля количества
+                                            cell.number_format = '0.00'  # Формат с 2 знаками после запятой для количества
+                                            cell.data_type = 'n'  # Явно указываем тип данных как число
+                                            logger.info(f"Заменено в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{old_value}' -> {numeric_value} (число)")
+                                        else:
+                                            # Для нулевых значений проверяем, нужно ли заменять
+                                            if str(old_value).strip() in ['חסרים משקלים', 'חסרים משקלים', 'חסרים אריזות', 'חסרים קרטונים', '']:
+                                                cell.value = numeric_value
+                                                # Устанавливаем формат ячейки как числовой для поля количества
+                                                cell.number_format = '0.00'  # Формат с 2 знаками после запятой для количества
+                                                cell.data_type = 'n'  # Явно указываем тип данных как число
+                                                logger.info(f"Заменено нулевое значение количества с '{old_value}' на {numeric_value} (число)")
+                                            else:
+                                                logger.info(f"Пропущено нулевое значение количества - в ячейке уже есть значение: '{old_value}'")
                                     elif numeric_value > 0:
                                         # Для других числовых полей устанавливаем только положительные значения
                                         cell.value = numeric_value
+                                        # Устанавливаем числовой формат для всех числовых полей
+                                        if target_col in ['סה"כ קרטונים']:
+                                            cell.number_format = '0.00'  # Формат с 2 знаками после запятой для количества
+                                            cell.data_type = 'n'  # Явно указываем тип данных как число
+                                        elif target_col in ['מוצרים מוכנים לאכילה']:
+                                            cell.number_format = '0.00'  # Числовой формат с 2 знаками после запятой для веса
+                                            cell.data_type = 'n'  # Явно указываем тип данных как число
+                                        else:
+                                            cell.number_format = '0'  # Целый формат для других числовых полей
+                                            cell.data_type = 'n'  # Явно указываем тип данных как число
                                         logger.info(f"Заменено в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{old_value}' -> {numeric_value} (число)")
                                     else:
                                         logger.info(f"Пропущено нулевое значение в столбце '{target_col}' - оставлено: '{old_value}'")
