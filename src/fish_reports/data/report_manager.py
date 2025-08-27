@@ -236,6 +236,18 @@ class ReportManager:
             workbook.save(dest_path)
             workbook.close()
 
+            # Verify the file was saved correctly
+            logger.info(f"Файл сохранен: {dest_path}")
+            try:
+                # Quick verification - try to read back the file
+                verify_wb = openpyxl.load_workbook(dest_path, data_only=True)
+                verify_sheet = verify_wb.active
+                logger.info(f"Проверка файла: {verify_sheet.max_row} строк, {verify_sheet.max_column} колонок")
+                verify_wb.close()
+                logger.info("Файл успешно сохранен и проверен")
+            except Exception as e:
+                logger.error(f"Ошибка при проверке сохраненного файла: {e}")
+
             return True
 
         except Exception as e:
@@ -250,12 +262,15 @@ class ReportManager:
             Dictionary mapping field names to data keys
         """
         field_mappings = {
-            # Base document reference
+            # Base document reference - mapping from intermediate to final report
             'אסמכתת בסיס': 'אסמכתת בסיס',
+            'מספר תעודת משלוח': 'אסמכתת בסיס',  # Final report field -> intermediate data
 
-            # Package and weight totals
+            # Package and weight totals - mapping from intermediate to final report
             'סה\'כ אריזות': 'סה\'כ אריזות',
+            'סה"כ קרטונים': 'סה\'כ אריזות',  # Final report field -> intermediate data
             'סה\'כ משקל': 'סה\'כ משקל',
+            'מוצרים מוכנים לאכילה': 'סה\'כ משקל',  # Final report field -> intermediate data
 
             # Client information
             'שם כרטיס': 'שם כרטיס',
@@ -275,39 +290,240 @@ class ReportManager:
             field_mappings: Dictionary mapping field names to data keys
         """
         # Define field replacements for specific known fields
-        # Ищем существующие поля в колонке "שדה" и заменяем значения в колонке "ערך"
+        # Ищем несколько вариантов написания полей
+        logger.info(f"Данные для замены: {replacement_data}")
+
+        # Define field replacements for specific known fields with Hebrew character handling
+        # Mapping from intermediate file fields to final report fields
+        logger.info(f"Данные для замены: {replacement_data}")
+
         field_replacements = [
+            # אסמכתת בסיס -> מספר תעודת משלוח
             {
-                'search_field': 'אסמכתת בסיס',
-                'replace_value': str(replacement_data.get('אסמכתת בסיס', 'אסמכתת בסיס'))
+                'intermediate_field': 'אסמכתת בסיס',
+                'target_column': 'מספר תעודת משלוח',
+                'replace_value': replacement_data.get('אסמכתת בסיס', ''),
+                'is_numeric': False  # Это текстовое поле
             },
+            # סה'כ משקל -> מוצרים מוכנים לאכילה
             {
-                'search_field': 'סה\'כ משקל',
-                'replace_value': str(replacement_data.get('סה\'כ משקל', 'סה\'כ משקל'))
+                'intermediate_field': 'סה\'כ משקל',
+                'target_column': 'מוצרים מוכנים לאכילה',
+                'replace_value': replacement_data.get('סה\'כ משקל', replacement_data.get('סהכ משקל', 0)),
+                'is_numeric': True  # Это числовое поле
             },
+            # סה'כ אריזות -> סה"כ קרטונים
             {
-                'search_field': 'סה\'כ אריזות',
-                'replace_value': str(replacement_data.get('סה\'כ אריזות', 'סה\'כ אריזות'))
+                'intermediate_field': 'סה\'כ אריזות',
+                'target_column': 'סה"כ קרטונים',
+                'replace_value': replacement_data.get('סה\'כ אריזות', replacement_data.get('סהכ אריזות', 0)),
+                'is_numeric': True  # Это числовое поле
             }
         ]
 
-        # Process all cells - ищем пары ячеек
-        for row in worksheet.iter_rows():
-            cells = list(row)
-            if len(cells) >= 2:  # Нужно минимум 2 колонки
-                field_cell = cells[0]  # Колонка "שדה"
-                value_cell = cells[1]  # Колонка "ערך"
+        logger.info("Конфигурация замен по столбцам:")
+        for replacement in field_replacements:
+            value_display = replacement['replace_value']
+            if replacement['is_numeric'] and value_display != '':
+                try:
+                    # Для числовых значений показываем как число
+                    numeric_value = float(value_display) if value_display != '' else 0
+                    value_display = f"{numeric_value} (число)"
+                except (ValueError, TypeError):
+                    value_display = f"{value_display} (число, ошибка преобразования)"
+            logger.info(f"  {replacement['intermediate_field']} -> столбец '{replacement['target_column']}' : '{value_display}'")
 
-                if field_cell.value is not None:
-                    field_value = str(field_cell.value)
+        # Log which fields we have data for
+        available_data = {k: v for k, v in replacement_data.items() if v is not None and str(v).strip()}
+        logger.info(f"Доступные данные для замены: {available_data}")
 
-                    # Ищем совпадение с полем
-                    for replacement in field_replacements:
-                        if field_value == replacement['search_field']:
-                            # Заменяем значение в соседней ячейке
-                            value_cell.value = replacement['replace_value']
-                            logger.debug(f"Replaced value for field '{replacement['search_field']}' with '{replacement['replace_value']}'")
+        replacements_made = 0
+
+        # Log worksheet info for debugging
+        logger.info(f"Анализируем лист '{worksheet.title}' с {worksheet.max_row} строками и {worksheet.max_column} колонками")
+
+        # Сначала найдем номера столбцов по их названиям
+        column_mapping = {}
+        header_row = None
+
+        # Ищем строку заголовков (обычно первая строка)
+        for row_idx, row in enumerate(worksheet.iter_rows(), 1):
+            row_cells = list(row)
+            if len(row_cells) >= 3:  # Минимум 3 колонки
+                # Проверяем, есть ли в строке названия наших целевых столбцов
+                row_text = ' '.join([str(cell.value) if cell.value is not None else '' for cell in row_cells])
+                has_target_columns = any(target_col in row_text for replacement in field_replacements for target_col in [replacement['target_column']])
+
+                if has_target_columns:
+                    header_row = row_idx
+                    logger.info(f"Найдена строка заголовков: {row_idx}")
+
+                    # Определяем номера столбцов
+                    for col_idx, cell in enumerate(row_cells, 1):
+                        if cell.value is not None:
+                            cell_value = str(cell.value)
+                            for replacement in field_replacements:
+                                target_col = replacement['target_column']
+                                # Handle Hebrew special characters
+                                normalized_cell = cell_value.replace('"', "'").replace('״', "'")
+                                normalized_target = target_col.replace('"', "'").replace('״', "'")
+
+                                if target_col in cell_value or normalized_target in normalized_cell:
+                                    column_mapping[target_col] = col_idx
+                                    logger.info(f"Столбец '{target_col}' найден в колонке {col_idx}")
+                    break
+
+        if not column_mapping:
+            logger.warning("Не найдены целевые столбцы в файле")
+            return 0
+
+        logger.info(f"Найденные столбцы: {column_mapping}")
+
+        # Теперь заменяем значения в найденных столбцах
+        data_row_idx = header_row + 1 if header_row else 2  # Предполагаем, что данные начинаются со следующей строки
+
+        for replacement in field_replacements:
+            target_col = replacement['target_column']
+            if target_col in column_mapping:
+                col_idx = column_mapping[target_col]
+
+                # Ищем строку с данными (обычно вторая строка после заголовков)
+                for row_offset in [0, 1, 2]:  # Проверяем несколько строк
+                    try:
+                        data_row_idx = header_row + 1 + row_offset
+                        if data_row_idx > worksheet.max_row:
                             break
+
+                        cell = worksheet.cell(row=data_row_idx, column=col_idx)
+                        if cell.value is not None:
+                            old_value = cell.value
+
+                            # Сохраняем значение с правильным типом данных
+                            if replacement['is_numeric'] and replacement['replace_value'] != '':
+                                try:
+                                    # Преобразуем в число
+                                    numeric_value = float(replacement['replace_value'])
+                                    cell.value = numeric_value
+                                    logger.info(f"Заменено в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{old_value}' -> {numeric_value} (число)")
+                                except (ValueError, TypeError) as e:
+                                    logger.warning(f"Не удалось преобразовать '{replacement['replace_value']}' в число: {e}")
+                                    cell.value = replacement['replace_value']
+                                    logger.info(f"Заменено в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{old_value}' -> '{replacement['replace_value']}' (текст)")
+                            else:
+                                # Сохраняем как текст
+                                cell.value = replacement['replace_value']
+                                logger.info(f"Заменено в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{old_value}' -> '{replacement['replace_value']}' (текст)")
+
+                            replacements_made += 1
+                            break
+                    except Exception as e:
+                        logger.debug(f"Ошибка при замене в строке {data_row_idx}: {e}")
+                        continue
+
+        logger.info(f"Всего сделано замен: {replacements_made}")
+        return replacements_made
+
+    def _search_fields_in_all_cells(self, worksheet, field_replacements: List[Dict], replacement_data: Dict) -> int:
+        """
+        Search for fields in all cells of the worksheet, not just first two columns.
+
+        Args:
+            worksheet: openpyxl worksheet object
+            field_replacements: List of field replacement configurations
+            replacement_data: Dictionary with replacement values
+
+        Returns:
+            Number of replacements made
+        """
+        replacements_made = 0
+
+        # First, identify which fields actually exist in the template
+        existing_fields = set()
+        for row_idx, row in enumerate(worksheet.iter_rows(), 1):
+            for col_idx, cell in enumerate(row, 1):
+                if cell.value is not None:
+                    cell_value = str(cell.value)
+                    for replacement in field_replacements:
+                        for search_field in replacement['search_fields']:
+                            if search_field in cell_value:
+                                existing_fields.add(search_field)
+
+        # Log which fields exist and which are missing
+        all_search_fields = set()
+        for replacement in field_replacements:
+            all_search_fields.update(replacement['search_fields'])
+
+        missing_fields = all_search_fields - existing_fields
+        if missing_fields:
+            logger.info(f"Пропускаем поиск следующих полей (отсутствуют в шаблоне): {list(missing_fields)}")
+
+        if not existing_fields:
+            logger.info("В шаблоне не найдено ни одного из искомых полей. Поиск пропущен.")
+            return 0
+
+        logger.info(f"Выполняем поиск только для существующих полей: {list(existing_fields)}")
+
+        # Search only for existing fields
+        for row_idx, row in enumerate(worksheet.iter_rows(), 1):
+            row_cells = list(row)
+
+            # Ищем в каждой строке все поля, которые нужно заменить
+            for replacement in field_replacements:
+                # Проверяем, есть ли данные для замены
+                if not replacement['replace_value'] or str(replacement['replace_value']).strip() == '':
+                    continue
+
+                for search_field in replacement['search_fields']:
+                    # Ищем поле в текущей строке
+                    field_found_in_row = False
+                    field_col_idx = None
+
+                    for col_idx, cell in enumerate(row_cells, 1):
+                        if cell.value is not None:
+                            cell_value = str(cell.value)
+                            # Handle Hebrew special characters
+                            normalized_cell = cell_value.replace('"', "'").replace('״', "'")
+                            normalized_search = search_field.replace('"', "'").replace('״', "'")
+
+                            # Ищем подстроку в тексте ячейки
+                            if search_field in cell_value or normalized_search in normalized_cell:
+                                field_found_in_row = True
+                                field_col_idx = col_idx
+                                logger.info(f"Найдено поле '{search_field}' в строке {row_idx}, колонке {col_idx}: '{cell_value}'")
+                                break
+
+                    # Если нашли поле в строке, ищем где заменить значение
+                    if field_found_in_row:
+                        # Стратегия 1: Заменяем в следующей колонке той же строки
+                        if field_col_idx < len(row_cells):
+                            value_cell = row_cells[field_col_idx]  # Следующая ячейка в той же строке
+                            if value_cell.value is not None:
+                                old_value = value_cell.value
+                                value_cell.value = replacement['replace_value']
+                                replacements_made += 1
+                                logger.info(f"Заменено поле '{search_field}' с '{old_value}' на '{replacement['replace_value']}' (строка {row_idx}, колонка {field_col_idx + 1})")
+                                break
+
+                        # Стратегия 2: Ищем пустую ячейку в той же строке для замены
+                        for col_idx in range(len(row_cells)):
+                            if col_idx + 1 != field_col_idx:  # Пропускаем колонку с названием поля
+                                check_cell = row_cells[col_idx]
+                                if check_cell.value is None or str(check_cell.value).strip() == '':
+                                    check_cell.value = replacement['replace_value']
+                                    replacements_made += 1
+                                    logger.info(f"Заменено поле '{search_field}' на '{replacement['replace_value']}' (строка {row_idx}, колонка {col_idx + 1})")
+                                    break
+                        else:
+                            # Стратегия 3: Заменяем в колонке с наибольшим номером в строке
+                            last_cell = row_cells[-1]
+                            if last_cell.value is not None:
+                                old_value = last_cell.value
+                                last_cell.value = replacement['replace_value']
+                                replacements_made += 1
+                                logger.info(f"Заменено поле '{search_field}' с '{old_value}' на '{replacement['replace_value']}' (строка {row_idx}, последняя колонка)")
+                            break
+
+        return replacements_made
 
     def validate_reports_structure(self, reports_dir: Path) -> Dict[str, List[str]]:
         """
@@ -495,7 +711,6 @@ class ReportManager:
                     if success:
                         results[file_path.name] = str(dest_path)
                         logger.info(f"Successfully processed: {file_path.name}")
-                        self.copied_files_count += 1
                         self.copied_files_count += 1
                     else:
                         logger.error(f"Failed to process: {file_path.name}")
