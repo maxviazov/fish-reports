@@ -96,6 +96,9 @@ class FishReportsWorkflow:
 
             self._log_info("Начинаем обработку файлов...")
 
+            # Clear intermediate and output directories before processing
+            self._clear_directories()
+
             # Step 1: Load source file
             if not self._load_source_file():
                 return False
@@ -332,3 +335,25 @@ class FishReportsWorkflow:
     def get_results(self) -> Dict[str, Any]:
         """Get processing results."""
         return self.processing_results.copy()
+
+    def _clear_directories(self):
+        """Clear intermediate and output directories before processing."""
+        try:
+            # Clear intermediate directory
+            if self.intermediate_dir and self.intermediate_dir.exists():
+                self._log_info("Очищаем директорию промежуточных файлов...")
+                for file_path in self.intermediate_dir.glob("*"):
+                    if file_path.is_file():
+                        file_path.unlink()
+                self._log_info("Директория промежуточных файлов очищена")
+
+            # Clear output directory
+            if self.output_dir and self.output_dir.exists():
+                self._log_info("Очищаем директорию итоговых отчетов...")
+                for file_path in self.output_dir.glob("*"):
+                    if file_path.is_file():
+                        file_path.unlink()
+                self._log_info("Директория итоговых отчетов очищена")
+
+        except Exception as e:
+            self._log_error(f"Ошибка при очистке директорий: {e}")

@@ -275,32 +275,39 @@ class ReportManager:
             field_mappings: Dictionary mapping field names to data keys
         """
         # Define field replacements for specific known fields
+        # Ищем существующие поля в колонке "שדה" и заменяем значения в колонке "ערך"
         field_replacements = [
             {
-                'old_value': 'OLD_223044',
-                'new_value': str(replacement_data.get('אסמכתת בסיס', 'OLD_223044'))
+                'search_field': 'אסמכתת בסיס',
+                'replace_value': str(replacement_data.get('אסמכתת בסיס', 'אסמכתת בסיס'))
             },
             {
-                'old_value': '0',
-                'new_value': str(replacement_data.get('סה\'כ אריזות', 0))
+                'search_field': 'סה\'כ משקל',
+                'replace_value': str(replacement_data.get('סה\'כ משקל', 'סה\'כ משקל'))
             },
             {
-                'old_value': '7.0',
-                'new_value': str(replacement_data.get('סה\'כ משקל', 7.0))
+                'search_field': 'סה\'כ אריזות',
+                'replace_value': str(replacement_data.get('סה\'כ אריזות', 'סה\'כ אריזות'))
             }
         ]
 
-        # Process all cells
+        # Process all cells - ищем пары ячеек
         for row in worksheet.iter_rows():
-            for cell in row:
-                if cell.value is not None:
-                    cell_value = str(cell.value)
+            cells = list(row)
+            if len(cells) >= 2:  # Нужно минимум 2 колонки
+                field_cell = cells[0]  # Колонка "שדה"
+                value_cell = cells[1]  # Колонка "ערך"
 
-                    # Apply field replacements
+                if field_cell.value is not None:
+                    field_value = str(field_cell.value)
+
+                    # Ищем совпадение с полем
                     for replacement in field_replacements:
-                        if cell_value == replacement['old_value']:
-                            cell.value = replacement['new_value']
-                            logger.debug(f"Replaced '{replacement['old_value']}' with '{replacement['new_value']}' at {cell.coordinate}")
+                        if field_value == replacement['search_field']:
+                            # Заменяем значение в соседней ячейке
+                            value_cell.value = replacement['replace_value']
+                            logger.debug(f"Replaced value for field '{replacement['search_field']}' with '{replacement['replace_value']}'")
+                            break
 
     def validate_reports_structure(self, reports_dir: Path) -> Dict[str, List[str]]:
         """

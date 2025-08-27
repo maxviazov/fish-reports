@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Главный файл запуска Fish Reports System.
+Скрипт для тестирования Fish Reports System с Excel отчетами.
 """
 
 import sys
@@ -12,29 +12,38 @@ src_dir = current_dir / "src"
 sys.path.insert(0, str(src_dir))
 
 def main():
-    """Главная функция запуска."""
+    """Тестирование с Excel отчетами."""
     try:
         from fish_reports.core.workflow import FishReportsWorkflow
 
-        print("🐟 Запуск Fish Reports System...")
-        print("=" * 40)
+        print("🐟 Тестирование Fish Reports System с Excel отчетами...")
+        print("=" * 60)
 
-        # Create workflow instance
+        # Создаем workflow
         workflow = FishReportsWorkflow()
 
-        # Set default paths (can be overridden by user)
-        # ЗАМЕНИТЕ ЭТИ ПУТИ НА ВАШИ РЕАЛЬНЫЕ ПУТИ:
-        source_file = Path(r"sample_data/sample_source_data.xlsx")  # <- Ваш файл с данными
-        intermediate_dir = Path(r"sample_data/filtered")            # <- Папка для промежуточных файлов
-        reports_dir = Path(r"sample_data/reports_excel")           # <- Папка с отчетами
-        output_dir = Path(r"sample_data/output")                   # <- Папка для результатов
+        # Устанавливаем пути к примерным данным
+        source_file = current_dir / "sample_data" / "sample_source_data.xlsx"
+        intermediate_dir = current_dir / "sample_data" / "filtered"
+        reports_dir = current_dir / "sample_data" / "reports_excel"  # Excel отчеты
+        output_dir = current_dir / "sample_data" / "output"
 
-        # Set paths
+        print(f"📁 Исходный файл: {source_file}")
+        print(f"📁 Промежуточные файлы: {intermediate_dir}")
+        print(f"📁 Excel отчеты: {reports_dir}")
+        print(f"📁 Результаты: {output_dir}")
+        print()
+
+        # Создаем папки, если они не существуют
+        for dir_path in [intermediate_dir, reports_dir, output_dir]:
+            dir_path.mkdir(parents=True, exist_ok=True)
+
+        # Устанавливаем пути
         if not workflow.set_paths(source_file, intermediate_dir, reports_dir, output_dir):
             print("❌ Ошибка настройки путей")
             sys.exit(1)
 
-        # Process files
+        # Обрабатываем файлы
         if workflow.process_files():
             print("✅ Обработка завершена успешно!")
             results = workflow.get_results()
@@ -45,6 +54,11 @@ def main():
                 print(f"• Общее количество упаковок: {results.get('total_packages', 0)}")
                 print(f"• Найдено лицензий: {results.get('unique_licenses', 0)}")
                 print(f"• Скопировано файлов отчетов: {results.get('total_files', 0)}")
+
+                if results.get('total_files', 0) > 0:
+                    print("\n📋 Найденные отчеты:")
+                    for license, files in results.get('files_by_license', {}).items():
+                        print(f"  • Лицензия {license}: {len(files)} файл(ов)")
         else:
             print("❌ Ошибка при обработке файлов")
             sys.exit(1)

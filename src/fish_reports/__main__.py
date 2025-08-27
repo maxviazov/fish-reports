@@ -18,10 +18,11 @@ def main():
     workflow = FishReportsWorkflow()
 
     # Set default paths (can be overridden by user)
-    source_file = Path(r"C:\Users\office3\Desktop\FishKA\source\משקל.xlsx")
-    intermediate_dir = Path(r"C:\Users\office3\Desktop\FishKA\filtered")
-    reports_dir = Path(r"C:\Users\office3\Desktop\FishKA\reports")
-    output_dir = Path(r"C:\Users\office3\Desktop\FishKA\output")
+    # ЗАМЕНИТЕ ЭТИ ПУТИ НА ВАШИ РЕАЛЬНЫЕ ПУТИ:
+    source_file = Path(r"C:\Users\office3\Desktop\FishKA\source\משקל.xlsx")  # <- Ваш файл с данными
+    intermediate_dir = Path(r"C:\Users\office3\Desktop\FishKA\filtered")     # <- Папка для промежуточных файлов
+    reports_dir = Path(r"C:\Users\office3\Desktop\FishKA\reports")          # <- Папка с отчетами
+    output_dir = Path(r"C:\Users\office3\Desktop\FishKA\output")            # <- Папка для результатов
 
     print("🐟 Запуск Fish Reports System...")
     print("=" * 40)
