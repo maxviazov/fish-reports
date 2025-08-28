@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-Главный файл запуска Fish Reports System.
+Скрипт для запуска GUI версии Fish Reports System.
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -13,12 +12,12 @@ src_dir = current_dir / "src"
 sys.path.insert(0, str(src_dir))
 
 def main():
-    """Главная функция запуска."""
+    """Запуск GUI версии."""
     try:
         from fish_reports.gui.main_window import FishReportsApp
 
-        print("🐟 Запуск Fish Reports System...")
-        print("=" * 40)
+        print("🐟 Запуск GUI версии Fish Reports System...")
+        print("Если окно не появилось, проверьте панель задач")
 
         app = FishReportsApp()
         app.run()
@@ -29,7 +28,7 @@ def main():
         print("   pip install -r requirements.txt")
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Ошибка запуска: {e}")
+        print(f"❌ Ошибка запуска GUI: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
