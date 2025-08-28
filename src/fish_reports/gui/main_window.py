@@ -4,11 +4,12 @@ Main GUI window for Fish Reports application.
 
 import json
 import logging
-import os
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Optional
+
+from ttkthemes import ThemedTk
 
 from fish_reports.core.workflow import FishReportsWorkflow
 
@@ -24,9 +25,17 @@ class FishReportsApp:
 
     def __init__(self):
         """Initialize the application."""
-        self.root = tk.Tk()
+        self.root = ThemedTk(theme="arc")
         self.root.title("Fish Reports Processing System")
         self.root.geometry("800x600")
+
+        # Настройка стиля
+        self.style = ttk.Style()
+        self.style.configure('TLabelframe', padding=10)
+        self.style.configure('TLabelframe.Label', font=('Arial', 10, 'bold'))
+        self.style.configure('TButton', padding=5)
+        self.style.configure('Primary.TButton', padding=6)
+        self.style.configure('Title.TLabel', font=('Arial', 16, 'bold'))
 
         # Directory paths
         self.source_file: Optional[Path] = None
@@ -52,7 +61,7 @@ class FishReportsApp:
         self.title_label = ttk.Label(
             self.main_frame,
             text="Система обработки отчетов о рыбе",
-            font=("Arial", 16, "bold")
+            style="Title.TLabel"
         )
 
         # Directory selection frame
@@ -173,7 +182,8 @@ class FishReportsApp:
             self.buttons_frame,
             text="Начать обработку",
             command=self._start_processing,
-            state="disabled"
+            state="disabled",
+            style="Primary.TButton"
         )
 
         self.clear_button = ttk.Button(
@@ -466,3 +476,8 @@ class FishReportsApp:
         """Run the application main loop."""
         self._log_message("Приложение запущено. Выберите необходимые папки для начала работы.")
         self.root.mainloop()
+
+
+if __name__ == '__main__':
+    app = FishReportsApp()
+    app.run()
