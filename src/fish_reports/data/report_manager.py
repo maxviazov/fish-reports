@@ -347,11 +347,14 @@ class ReportManager:
         # Получаем текущую дату в формате dd.mm.yy (больше не используется, заменено на формулу)
         # current_date = datetime.now().strftime('%d.%m.%y')
 
+        weight_value = self._get_weight_value(replacement_data)
+
         field_replacements = [
             # אסמכתת בסיס -> מספר תעודת משלוח
             {
                 'intermediate_field': 'אסמכתת בסיס',
                 'target_column': 'מספר תעודת משלוח',
+                'search_fields': ['מספר תעודת משלוח', 'אסמכתת בסיס'],
                 'replace_value': replacement_data.get('אסמכתת בסיס', ''),
                 'is_numeric': False  # Это текстовое поле
             },
@@ -359,14 +362,25 @@ class ReportManager:
             {
                 'intermediate_field': 'סה\'כ משקל',
                 'target_column': 'מוצרים מוכנים לאכילה',
-                'replace_value': self._get_weight_value(replacement_data),
-                'is_numeric': True,  # Это числовое поле
-                'force_replace': True  # Всегда заменять значение, даже если оно равно 0
+                'search_fields': ['מוצרים מוכנים לאכילה', 'משקל כולל', 'משקל'],
+                'replace_value': weight_value,
+                'is_numeric': True,
+                'force_replace': True
+            },
+            # סה'כ משקל -> סה"כ משקל
+            {
+                'intermediate_field': 'סה\'כ משקל',
+                'target_column': 'סה"כ משקל',
+                'search_fields': ['סה"כ משקל', 'סה\'כ משקל', 'סהכ משקל'],
+                'replace_value': weight_value,
+                'is_numeric': True,
+                'force_replace': True
             },
             # סה'כ אריזות -> סה"כ קרטונים
             {
                 'intermediate_field': 'סה\'כ אריזות',
                 'target_column': 'סה"כ קרטונים',
+                'search_fields': ['סה"כ קרטונים', 'סה\'כ אריזות', 'סהכ אריזות', 'כמות אריזות'],
                 'replace_value': replacement_data.get('סה\'כ אריזות', replacement_data.get('סהכ אריזות', 0)),
                 'is_numeric': True  # Это числовое поле
             },
@@ -374,6 +388,7 @@ class ReportManager:
             {
                 'intermediate_field': 'current_date_formula',
                 'target_column': 'תאריך',
+                'search_fields': ['תאריך', 'date', 'תאריך'],
                 'replace_value': 'PLACEHOLDER_DATE',  # Будет заменено на текущую дату
                 'is_numeric': False,  # Это дата, не число
                 'is_formula': True  # Флаг для специальной обработки даты
@@ -433,8 +448,12 @@ class ReportManager:
                     break
 
         if not column_mapping:
-            logger.warning("Не найдены целевые столбцы в файле")
-            return 0
+            logger.warning("Не найдены целевые столбцы в файле - используем альтернативную стратегию поиска")
+            # Сначала попробуем добавить отсутствующие поля
+            replacements_made += self._add_missing_fields(worksheet, field_replacements, replacement_data)
+            # Затем используем альтернативную стратегию поиска
+            replacements_made += self._search_fields_in_all_cells(worksheet, field_replacements, replacement_data)
+            return replacements_made
 
         logger.info(f"Найденные столбцы: {column_mapping}")
 
@@ -459,21 +478,19 @@ class ReportManager:
 
                             # Специальная обработка для поля веса - всегда проверяем на "חסרים משקלים"
                             if target_col == 'מוצרים מוכנים לאכילה' and str(old_value).strip() in ['חסרים משקלים', 'חסרים משקלים']:
-                                # Принудительно заменяем "חסרים משקלים" на числовое значение
+                                    # Принудительно заменяем "חסרים משקלים" на числовое значение
                                 try:
                                     numeric_value = float(replacement['replace_value']) if replacement['replace_value'] != '' else 0.0
                                     cell.value = numeric_value
-                                    # Устанавливаем формат ячейки как числовой
-                                    cell.number_format = '0.00'  # Числовой формат с 2 знаками после запятой
+                                    # Устанавливаем формат ячейки как General (стандартный формат Excel)
+                                    cell.number_format = 'General'  # Используем General вместо 0.00
                                     cell.data_type = 'n'  # Явно указываем тип данных как число
                                     logger.info(f"Принудительно заменено 'חסרים משקלים' на {numeric_value} (число) в поле веса")
                                     replacements_made += 1
                                     break
                                 except (ValueError, TypeError):
                                     logger.warning(f"Не удалось преобразовать значение веса '{replacement['replace_value']}' в число")
-                                    continue
-
-                            # Сохраняем значение с правильным типом данных
+                                    continue                            # Сохраняем значение с правильным типом данных
                             if replacement.get('is_formula', False):
                                 # Для формулы TODAY() вычисляем текущую дату и устанавливаем как значение
                                 from datetime import datetime
@@ -494,13 +511,8 @@ class ReportManager:
                                     if target_col == 'מוצרים מוכנים לאכילה':
                                         numeric_value = float(numeric_value)  # Вес всегда float
                                     elif target_col == 'סה"כ קרטונים':
-                                        # Для количества: если значение > 0, округляем вверх, иначе оставляем как есть
-                                        if numeric_value > 0:
-                                            import math
-                                            numeric_value = max(1, math.ceil(numeric_value))  # Минимум 1, округляем вверх
-                                            logger.info(f"Количество округлено вверх: {replacement['replace_value']} -> {numeric_value}")
-                                        else:
-                                            numeric_value = float(numeric_value)  # Оставляем как float для нулевых значений
+                                        # Для количества оставляем как float, без округления
+                                        numeric_value = float(numeric_value)  # Количество может быть дробным
                                     else:
                                         numeric_value = float(numeric_value)  # Остальные поля как float
 
@@ -508,11 +520,16 @@ class ReportManager:
                                     if target_col == 'מוצרים מוכנים לאכילה':
                                         # Очищаем ячейку полностью перед установкой нового значения
                                         cell.value = None
-                                        cell.data_type = 'n'  # Устанавливаем тип как число
-                                        cell.style = 'Normal'  # Сбрасываем стиль
+                                        cell.style = 'Normal'
 
                                         # Устанавливаем числовое значение
                                         cell.value = float(numeric_value)
+                                        cell.data_type = 'n'
+                                        cell.number_format = 'General'
+
+                                        # Применяем правильный шрифт как в оригинальном файле
+                                        from openpyxl.styles import Font
+                                        cell.font = Font(name='Arial', size=9)
 
                                         # Убеждаемся, что значение сохранено правильно
                                         logger.info(f"Установлено значение веса: {cell.value} (тип: {type(cell.value)})")
@@ -526,19 +543,36 @@ class ReportManager:
                                                 logger.error("Не удалось установить числовое значение для веса")
 
                                         logger.info(f"Заменено поле веса с '{old_value}' на {numeric_value} (число) - специальный текст")
+                                    # Специальная обработка для поля 'סה"כ משקל'
+                                    elif target_col == 'סה"כ משקל':
+                                        # Очищаем ячейку полностью перед установкой нового значения
+                                        cell.value = None
+                                        cell.style = 'Normal'
+
+                                        # Устанавливаем числовое значение
+                                        cell.value = float(numeric_value)
+                                        cell.data_type = 'n'
+                                        cell.number_format = 'General'
+
+                                        # Применяем правильный шрифт как в оригинальном файле
+                                        from openpyxl.styles import Font
+                                        cell.font = Font(name='Arial', size=9)
+                                        logger.info(f"Установлено значение общего веса: {cell.value} (тип: {type(cell.value)})")
+                                        logger.info(f"Заменено поле общего веса с '{old_value}' на {numeric_value} (число)")
                                     # Специальная обработка для поля количества (аризות)
                                     elif target_col == 'סה"כ קרטונים':
                                         # Очищаем ячейку полностью перед установкой нового значения
                                         cell.value = None
-                                        cell.data_type = 'n'  # Устанавливаем тип как число
-                                        cell.style = 'Normal'  # Сбрасываем стиль
+                                        cell.style = 'Normal'
 
-                                        # Устанавливаем числовое значение с правильным округлением
-                                        if numeric_value > 0:
-                                            import math
-                                            cell.value = max(1, math.ceil(numeric_value))  # Минимум 1, округляем вверх
-                                        else:
-                                            cell.value = numeric_value  # Оставляем как есть для нулевых значений
+                                        # Устанавливаем числовое значение без округления
+                                        cell.value = float(numeric_value)  # Оставляем как float, как в оригинале
+                                        cell.data_type = 'n'
+                                        cell.number_format = 'General'
+
+                                        # Применяем правильный шрифт как в оригинальном файле
+                                        from openpyxl.styles import Font
+                                        cell.font = Font(name='Arial', size=9)
 
                                         # Убеждаемся, что значение сохранено правильно
                                         logger.info(f"Установлено значение количества: {cell.value} (тип: {type(cell.value)})")
@@ -546,32 +580,37 @@ class ReportManager:
                                         # Дополнительная проверка - если значение все еще не число, конвертируем
                                         if not isinstance(cell.value, (int, float)):
                                             try:
-                                                if numeric_value > 0:
-                                                    import math
-                                                    cell.value = max(1, math.ceil(numeric_value))
-                                                else:
-                                                    cell.value = numeric_value
+                                                cell.value = float(numeric_value)  # Оставляем как float
                                                 logger.info(f"Принудительно конвертировано значение количества: {cell.value}")
                                             except Exception:
                                                 logger.error("Не удалось установить значение для количества")
 
-                                        logger.info(f"Заменено поле количества с '{old_value}' на {numeric_value} (округлено до {cell.value})")
+                                        logger.info(f"Заменено поле количества с '{old_value}' на {numeric_value} (дробное число)")
                                     elif numeric_value > 0:
                                         # Для других числовых полей устанавливаем только положительные значения
                                         cell.value = numeric_value
                                         # Устанавливаем числовой формат для всех числовых полей
                                         if target_col in ['סה"כ קרטונים']:
-                                            cell.number_format = '0'  # Целый формат для количества (даже если значение округлено)
+                                            cell.number_format = 'General'  # Используем General вместо 0.0
                                             cell.data_type = 'n'  # Явно указываем тип данных как число
                                             cell.style = 'Normal'  # Сбрасываем стиль
+                                            # Применяем Arial шрифт для числовых полей
+                                            from openpyxl.styles import Font
+                                            cell.font = Font(name='Arial', size=9)
                                         elif target_col in ['מוצרים מוכנים לאכילה']:
-                                            cell.number_format = '0.00'  # Числовой формат с 2 знаками после запятой для веса
+                                            cell.number_format = 'General'  # Используем General вместо 0.0
                                             cell.data_type = 'n'  # Явно указываем тип данных как число
                                             cell.style = 'Normal'  # Сбрасываем стиль
+                                            # Применяем Arial шрифт для числовых полей
+                                            from openpyxl.styles import Font
+                                            cell.font = Font(name='Arial', size=9)
                                         else:
                                             cell.number_format = '0'  # Целый формат для других числовых полей
                                             cell.data_type = 'n'  # Явно указываем тип данных как число
                                             cell.style = 'Normal'  # Сбрасываем стиль
+                                            # Применяем Arial шрифт для числовых полей
+                                            from openpyxl.styles import Font
+                                            cell.font = Font(name='Arial', size=9)
                                         logger.info(f"Заменено в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{old_value}' -> {numeric_value} (число)")
                                     else:
                                         logger.info(f"Пропущено нулевое значение в столбце '{target_col}' - оставлено: '{old_value}'")
@@ -594,6 +633,92 @@ class ReportManager:
         logger.info(f"Всего сделано замен: {replacements_made}")
         return replacements_made
 
+    def _add_missing_fields(self, worksheet, field_replacements: List[Dict], replacement_data: Dict) -> int:
+        """
+        Add missing fields to the worksheet that are required by the robot system.
+
+        Args:
+            worksheet: openpyxl worksheet object
+            field_replacements: List of field replacement configurations
+            replacement_data: Dictionary with replacement values
+
+        Returns:
+            Number of fields added
+        """
+        fields_added = 0
+
+        # Найдем последнюю заполненную строку
+        last_row = worksheet.max_row
+        for row_idx in range(last_row, 0, -1):
+            if any(cell.value is not None for cell in worksheet[row_idx]):
+                last_row = row_idx
+                break
+
+        # Добавляем поле веса, если его нет
+        weight_field_exists = False
+        for row in worksheet.iter_rows():
+            for cell in row:
+                if cell.value and 'מוצרים מוכנים לאכילה' in str(cell.value):
+                    weight_field_exists = True
+                    break
+            if weight_field_exists:
+                break
+
+        if not weight_field_exists:
+            # Добавляем поле веса в новую строку
+            new_row_idx = last_row + 2  # Пропускаем одну строку для читаемости
+
+            # Находим подходящее место для поля (колонка 1)
+            weight_cell = worksheet.cell(row=new_row_idx, column=1)
+            weight_cell.value = 'מוצרים מוכנים לאכילה'
+
+            # Добавляем значение веса в следующую колонку
+            value_cell = worksheet.cell(row=new_row_idx, column=2)
+            weight_value = self._get_weight_value(replacement_data)
+            if weight_value > 0:
+                value_cell.value = float(weight_value)
+                value_cell.number_format = 'General'  # Используем General вместо 0.0
+                value_cell.data_type = 'n'
+                # Применяем Arial шрифт
+                from openpyxl.styles import Font
+                value_cell.font = Font(name='Arial', size=9)
+                logger.info(f"Добавлено поле веса 'מוצרים מוכנים לאכילה' со значением {weight_value} в строку {new_row_idx}")
+                fields_added += 1
+
+        # Добавляем поле количества, если его нет
+        quantity_field_exists = False
+        for row in worksheet.iter_rows():
+            for cell in row:
+                if cell.value and 'סה"כ קרטונים' in str(cell.value):
+                    quantity_field_exists = True
+                    break
+            if quantity_field_exists:
+                break
+
+        if not quantity_field_exists:
+            # Добавляем поле количества в следующую строку
+            new_row_idx = last_row + 3
+
+            # Находим подходящее место для поля (колонка 1)
+            quantity_cell = worksheet.cell(row=new_row_idx, column=1)
+            quantity_cell.value = 'סה"כ קרטונים'
+
+            # Добавляем значение количества в следующую колонку
+            value_cell = worksheet.cell(row=new_row_idx, column=2)
+            quantity_value = replacement_data.get('סה\'כ אריזות', replacement_data.get('סהכ אריזות', 0))
+            if quantity_value > 0:
+                value_cell.value = float(quantity_value)
+                value_cell.number_format = 'General'  # Используем General вместо 0.0
+                value_cell.data_type = 'n'
+                # Применяем Arial шрифт
+                from openpyxl.styles import Font
+                value_cell.font = Font(name='Arial', size=9)
+                logger.info(f"Добавлено поле количества 'סה\"כ קרטונים' со значением {quantity_value} в строку {new_row_idx}")
+                fields_added += 1
+
+        logger.info(f"Добавлено {fields_added} отсутствующих полей")
+        return fields_added
+
     def _search_fields_in_all_cells(self, worksheet, field_replacements: List[Dict], replacement_data: Dict) -> int:
         """
         Search for fields in all cells of the worksheet, not just first two columns.
@@ -614,10 +739,22 @@ class ReportManager:
             for col_idx, cell in enumerate(row, 1):
                 if cell.value is not None:
                     cell_value = str(cell.value)
+                    # Ищем как точное совпадение, так и частичное
                     for replacement in field_replacements:
-                        for search_field in replacement['search_fields']:
-                            if search_field in cell_value:
-                                existing_fields.add(search_field)
+                        target_col = replacement['target_column']
+                        intermediate_field = replacement['intermediate_field']
+
+                        # Проверяем целевое поле (для робота)
+                        if target_col in cell_value:
+                            existing_fields.add(target_col)
+
+                        # Проверяем промежуточное поле (из данных)
+                        if intermediate_field in cell_value:
+                            existing_fields.add(intermediate_field)
+
+                        # Ищем похожие поля для веса
+                        if 'משקל' in cell_value or 'weight' in cell_value.lower():
+                            existing_fields.add('weight_related')
 
         # Log which fields exist and which are missing
         all_search_fields = set()
@@ -670,9 +807,24 @@ class ReportManager:
                             value_cell = row_cells[field_col_idx]  # Следующая ячейка в той же строке
                             if value_cell.value is not None:
                                 old_value = value_cell.value
-                                value_cell.value = replacement['replace_value']
+                                # Специальная обработка для числовых полей
+                                if replacement['is_numeric']:
+                                    try:
+                                        numeric_value = float(replacement['replace_value']) if replacement['replace_value'] != '' else 0.0
+                                        value_cell.value = numeric_value
+                                        value_cell.number_format = 'General'  # Используем General вместо 0.0
+                                        value_cell.data_type = 'n'
+                                        # Применяем Arial шрифт
+                                        from openpyxl.styles import Font
+                                        value_cell.font = Font(name='Arial', size=9)
+                                        logger.info(f"Заменено числовое поле '{search_field}' с '{old_value}' на {numeric_value} (число)")
+                                    except (ValueError, TypeError):
+                                        value_cell.value = replacement['replace_value']
+                                        logger.info(f"Заменено поле '{search_field}' с '{old_value}' на '{replacement['replace_value']}' (текст)")
+                                else:
+                                    value_cell.value = replacement['replace_value']
+                                    logger.info(f"Заменено поле '{search_field}' с '{old_value}' на '{replacement['replace_value']}' (строка {row_idx}, колонка {field_col_idx + 1})")
                                 replacements_made += 1
-                                logger.info(f"Заменено поле '{search_field}' с '{old_value}' на '{replacement['replace_value']}' (строка {row_idx}, колонка {field_col_idx + 1})")
                                 break
 
                         # Стратегия 2: Ищем пустую ячейку в той же строке для замены
