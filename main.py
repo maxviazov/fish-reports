@@ -1,12 +1,13 @@
+#!/usr/bin/env python3
 """
-Entry point for the Fish Reports application.
+Main entry point for Fish Reports application.
 """
 
 import sys
 from pathlib import Path
 
 # Add src to Python path
-src_path = Path(__file__).parent.parent
+src_path = Path(__file__).parent / "src"
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
@@ -17,12 +18,12 @@ def main():
     # Create workflow instance
     workflow = FishReportsWorkflow()
 
-    # Set default paths (can be overridden by user)
-    # ЗАМЕНИТЕ ЭТИ ПУТИ НА ВАШИ РЕАЛЬНЫЕ ПУТИ:
-    source_file = Path(r"C:\Users\office3\Desktop\FishKA\source\משקל.xlsx")  # <- Ваш файл с данными
-    intermediate_dir = Path(r"C:\Users\office3\Desktop\FishKA\filtered")     # <- Папка для промежуточных файлов
-    reports_dir = Path(r"C:\Users\office3\Desktop\FishKA\reports")          # <- Папка с отчетами
-    output_dir = Path(r"C:\Users\office3\Desktop\FishKA\output")            # <- Папка для результатов
+    # Set test paths
+    base_dir = Path(__file__).parent
+    source_file = base_dir / "tmp" / "filtered_data.xlsx"
+    intermediate_dir = base_dir / "tmp"
+    reports_dir = base_dir / "test_reports"
+    output_dir = base_dir / "output"
 
     print("🐟 Запуск Fish Reports System...")
     print("=" * 40)

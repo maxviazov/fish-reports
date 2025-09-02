@@ -35,6 +35,7 @@ class ReportManager:
     def process_reports(self, reports_dir: Path, intermediate_file: Path) -> Dict[str, str]:
         """
         Process all report files by replacing fields with data from intermediate file.
+        Now supports multiple addresses per license by creating separate files.
 
         Args:
             reports_dir: Directory containing report template files
@@ -61,53 +62,126 @@ class ReportManager:
             logger.error("No valid replacement data found")
             return results
 
-        logger.info(f"Loaded data for {len(license_data_map)} licenses")
+        logger.info(f"Loaded data for {len(license_data_map)} unique license-address combinations")
 
-        # Process each report file
-        report_files = list(reports_dir.glob("*.xlsx"))
-        logger.info(f"Found {len(report_files)} report files to process")
+        # Group data by license number
+        license_groups = {}
+        for unique_key, data in license_data_map.items():
+            license_num = data['license_num']
+            if license_num not in license_groups:
+                license_groups[license_num] = []
+            license_groups[license_num].append((unique_key, data))
 
-        for file_path in report_files:
-            try:
-                # Extract license number from filename
-                license_num = self._extract_license_from_filename(file_path.name)
+        logger.info(f"Grouped into {len(license_groups)} license groups")
 
-                if not license_num:
-                    logger.warning(f"Could not extract license number from: {file_path.name}")
-                    continue
+        # Process each license group
+        for license_num, data_list in license_groups.items():
+            logger.info(f"Processing license {license_num} with {len(data_list)} address combinations")
 
-                # Find replacement data for this license
-                replacement_data = license_data_map.get(license_num)
-                if not replacement_data:
-                    logger.warning(f"No replacement data found for license: {license_num}")
-                    continue
+            # Find report files for this license
+            license_files = self._find_files_for_license(reports_dir, license_num)
 
-                # Create output file path
-                dest_path = self.output_dir / file_path.name
+            if not license_files:
+                logger.warning(f"No report files found for license: {license_num}")
+                continue
 
-                # Perform replacement
-                logger.info(f"Processing: {file_path.name} (license: {license_num})")
-                success = self._copy_file_with_replacement(file_path, dest_path, replacement_data)
+            # Sort addresses by full address for consistent ordering
+            data_list.sort(key=lambda x: x[1].get('address_key', ''))
 
-                if success:
-                    results[file_path.name] = str(dest_path)
-                    logger.info(f"Successfully processed: {file_path.name}")
-                else:
-                    logger.error(f"Failed to process: {file_path.name}")
+            # Process each address combination
+            for idx, (unique_key, replacement_data) in enumerate(data_list):
+                address_key = replacement_data.get('address_key', 'no_address')
+                logger.info(f"Processing address combination {idx+1}/{len(data_list)}: {address_key}")
 
-            except Exception as e:
-                logger.error(f"Error processing {file_path.name}: {e}")
+                # For each file and each address, create a separate output file
+                for file_path in license_files:
+                    try:
+                        # Create unique output filename
+                        base_name = file_path.stem
+                        if len(data_list) > 1:
+                            # Multiple addresses - include address in filename
+                            if address_key != 'no_address':
+                                new_name = f"{base_name}_{address_key}.xlsx"
+                            else:
+                                new_name = f"{base_name}_{idx+1}.xlsx"
+                        else:
+                            # Single address - keep original name
+                            new_name = f"{base_name}.xlsx"
+
+                        dest_path = self.output_dir / new_name
+
+                        # Perform replacement
+                        logger.info(f"Processing: {file_path.name} -> {new_name} (license: {license_num}, address: {address_key})")
+                        success = self._copy_file_with_replacement(file_path, dest_path, replacement_data)
+
+                        if success:
+                            results[file_path.name] = str(dest_path)
+                            logger.info(f"Successfully processed: {new_name}")
+                            self.copied_files_count += 1
+                        else:
+                            logger.error(f"Failed to process: {new_name}")
+
+                    except Exception as e:
+                        logger.error(f"Error processing {file_path.name}: {e}")
 
         logger.info(f"Processing complete. Successfully processed {len(results)} files")
 
         # Report unprocessed licenses if any
-        self._report_unprocessed_licenses(license_data_map, results)
+        self._report_unprocessed_licenses_new(license_data_map, results)
 
         return results
 
-    def _report_unprocessed_licenses(self, license_data_map: Dict[str, Dict], results: Dict[str, str]):
+    def _find_files_for_license(self, reports_dir: Path, license_num: str) -> List[Path]:
+        """
+        Find all report files that contain the given license number.
+
+        Args:
+            reports_dir: Directory to search for report files
+            license_num: License number to search for
+
+        Returns:
+            List of file paths containing the license
+        """
+        matching_files = []
+
+        # Search by filename
+        for pattern in ("*.xlsx", "*.xlsm"):
+            for file_path in reports_dir.glob(pattern):
+                if license_num in file_path.name:
+                    matching_files.append(file_path)
+
+        # If no files found by filename, search by content
+        if not matching_files:
+            logger.info(f"No files found by filename for license {license_num}, searching by content...")
+            try:
+                for pattern in ("*.xlsx", "*.xlsm"):
+                    for file_path in reports_dir.glob(pattern):
+                        try:
+                            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+                            found = False
+                            for ws in wb.worksheets:
+                                for row in ws.iter_rows(values_only=True):
+                                    for cell in row:
+                                        if cell and license_num in str(cell):
+                                            matching_files.append(file_path)
+                                            found = True
+                                            break
+                                    if found:
+                                        break
+                            wb.close()
+                            if found:
+                                break
+                        except Exception:
+                            continue
+            except Exception as e:
+                logger.error(f"Error searching by content: {e}")
+
+        return matching_files
+
+    def _report_unprocessed_licenses_new(self, license_data_map: Dict[str, Dict], results: Dict[str, str]):
         """
         Report licenses that have data but no corresponding report files.
+        Updated to work with new license-address key structure.
 
         Args:
             license_data_map: Dictionary with all available license data
@@ -120,19 +194,26 @@ class ReportManager:
             if license_num:
                 processed_licenses.add(license_num)
 
+        # Get all unique licenses from data
+        all_licenses = set()
+        for unique_key, data in license_data_map.items():
+            all_licenses.add(data['license_num'])
+
         # Find unprocessed licenses
-        all_licenses = set(license_data_map.keys())
         unprocessed_licenses = all_licenses - processed_licenses
 
         if unprocessed_licenses:
             logger.warning("Found licenses with data but no corresponding report files:")
             for license_num in sorted(unprocessed_licenses):
-                data = license_data_map[license_num]
-                logger.warning(f"  License {license_num}:")
-                logger.warning(f"    Client: {data.get('שם כרטיס', 'N/A')}")
-                logger.warning(f"    Base document: {data.get('אסמכתת בסיס', 'N/A')}")
-                logger.warning("    Total packages: %s" % data.get("סה'כ אריזות", 'N/A'))
-                logger.warning("    Total weight: %s" % data.get("סה'כ משקל", 'N/A'))
+                # Find all address combinations for this license
+                license_entries = [(k, v) for k, v in license_data_map.items() if v['license_num'] == license_num]
+                logger.warning(f"  License {license_num}: {len(license_entries)} address combinations")
+                for unique_key, data in license_entries:
+                    address = data.get('כתובת', 'N/A')
+                    logger.warning(f"    Address: {address}")
+                    logger.warning(f"    Base document: {data.get('אסמכתת בסיס', 'N/A')}")
+                    logger.warning("    Total packages: %s" % data.get("סה'כ אריזות", 'N/A'))
+                    logger.warning("    Total weight: %s" % data.get("סה'כ משקל", 'N/A'))
         else:
             logger.info("All licenses with data have corresponding report files")
 
@@ -160,6 +241,32 @@ class ReportManager:
 
         return None
 
+    def _format_address_for_ministry(self, full_address: str) -> str:
+        """
+        Format address for Ministry of Health requirements.
+        Removes city name and keeps only street address.
+
+        Args:
+            full_address: Full address string (e.g., "אשדוד, העצמאות 87")
+
+        Returns:
+            Street address only (e.g., "העצמאות 87")
+        """
+        if not full_address or not isinstance(full_address, str):
+            return ""
+
+        # Split by comma and take the part after comma (street address)
+        parts = full_address.split(',', 1)
+        if len(parts) > 1:
+            # Take the street part and strip whitespace
+            street_address = parts[1].strip()
+            logger.info(f"Formatted address: '{full_address}' -> '{street_address}'")
+            return street_address
+        else:
+            # No comma found, return as is (might already be street-only)
+            logger.info(f"Address already street-only: '{full_address}'")
+            return full_address.strip()
+
     def _load_intermediate_data(self, intermediate_file: Path) -> Dict[str, Dict]:
         """
         Load data from intermediate Excel file for field replacement.
@@ -174,7 +281,7 @@ class ReportManager:
             df = pd.read_excel(intermediate_file)
 
             # Check required columns
-            required_cols = ['ח"פ לקוח או מספר עוסק', 'אסמכתת בסיס']
+            required_cols = ['מספר עוסק מורשה', 'אסמכתת בסיס']
             missing_cols = [col for col in required_cols if col not in df.columns]
             if missing_cols:
                 logger.error(f"Missing required columns in intermediate file: {missing_cols}")
@@ -182,9 +289,17 @@ class ReportManager:
 
             # Create mapping: license -> data
             license_data = {}
+            address_column = None
+
+            # Find address column
+            for col in df.columns:
+                if 'כתובת' in str(col):
+                    address_column = col
+                    break
+
             for _, row in df.iterrows():
                 # Convert license number properly - handle both int and float types
-                license_raw = row['ח"פ לקוח או מספר עוסק']
+                license_raw = row['מספר עוסק מורשה']
                 if pd.isna(license_raw):
                     continue
 
@@ -194,15 +309,41 @@ class ReportManager:
                 except (ValueError, TypeError):
                     license_num = str(license_raw)
 
-                license_data[license_num] = {
+                # Get address as selected by user (no parsing needed)
+                address = ""
+                if address_column:
+                    full_address = row[address_column] if address_column in row else ""
+                    # Format address for Ministry requirements (remove city name)
+                    address = self._format_address_for_ministry(full_address)
+
+                # Create unique key for license + address combination
+                if address:
+                    # Use formatted address as key (without city name)
+                    address_key = str(address).strip()
+                    unique_key = f"{license_num}_{address_key}"
+                else:
+                    # Fallback for empty address
+                    address_key = "no_address"
+                    unique_key = f"{license_num}_{address_key}"
+
+                # Create data entry
+                data_entry = {
                     'אסמכתת בסיס': row['אסמכתת בסיס'],
                     'סה\'כ אריזות': row.get('סה\'כ אריזות', 0),
                     'סה\'כ משקל': row.get('סה\'כ משקל', 0),
                     'שם כרטיס': row.get('שם כרטיס', ''),
                     'שם לועזי': row.get('שם לועזי', ''),
-                    'כתובת': row.get('כתובת', ''),
+                    'כתובת': address,
+                    'license_num': license_num,
+                    'address_key': address_key
                 }
 
+                # Store with unique key
+                license_data[unique_key] = data_entry
+
+                logger.info(f"Loaded data for license {license_num}, address: {address_key}")
+
+            logger.info(f"Total unique license-address combinations: {len(license_data)}")
             return license_data
 
         except Exception as e:
@@ -383,6 +524,14 @@ class ReportManager:
                 'search_fields': ['סה"כ קרטונים', 'סה\'כ אריזות', 'סהכ אריזות', 'כמות אריזות'],
                 'replace_value': replacement_data.get('סה\'כ אריזות', replacement_data.get('סהכ אריזות', 0)),
                 'is_numeric': True  # Это числовое поле
+            },
+            # כתובת -> כתובת (адрес)
+            {
+                'intermediate_field': 'כתובת',
+                'target_column': 'כתובת',
+                'search_fields': ['כתובת', 'address', 'כתובת'],
+                'replace_value': replacement_data.get('כתובת', ''),
+                'is_numeric': False  # Это текстовое поле
             },
             # תאריך -> תאריך (текущая дата с правильным форматом)
             {
@@ -1011,32 +1160,51 @@ class ReportManager:
                 logger.error("No valid replacement data found")
                 return
 
-            logger.info(f"Loaded data for {len(license_data_map)} licenses")
+            logger.info(f"Loaded data for {len(license_data_map)} unique license-address combinations")
 
             results = {}
             for license_num, file_path_str in found_reports.items():
                 try:
                     file_path = Path(file_path_str)
 
-                    # Find replacement data for this license
-                    replacement_data = license_data_map.get(license_num)
-                    if not replacement_data:
+                    # Find all data entries for this license
+                    license_entries = [(k, v) for k, v in license_data_map.items() if v['license_num'] == license_num]
+
+                    if not license_entries:
                         logger.warning(f"No replacement data found for license: {license_num}")
                         continue
 
-                    # Create output file path
-                    dest_path = self.output_dir / file_path.name
+                    # Sort by address for consistent ordering
+                    license_entries.sort(key=lambda x: x[1].get('address_key', ''))
 
-                    # Perform replacement
-                    logger.info(f"Processing: {file_path.name} (license: {license_num})")
-                    success = self._copy_file_with_replacement(file_path, dest_path, replacement_data)
+                    # Process each address combination
+                    for idx, (unique_key, replacement_data) in enumerate(license_entries):
+                        address_key = replacement_data.get('address_key', 'no_address')
 
-                    if success:
-                        results[file_path.name] = str(dest_path)
-                        logger.info(f"Successfully processed: {file_path.name}")
-                        self.copied_files_count += 1
-                    else:
-                        logger.error(f"Failed to process: {file_path.name}")
+                        # Create unique output filename
+                        base_name = file_path.stem
+                        if len(license_entries) > 1:
+                            # Multiple addresses - include address in filename
+                            if address_key != 'no_address':
+                                new_name = f"{base_name}_{address_key}.xlsx"
+                            else:
+                                new_name = f"{base_name}_{idx+1}.xlsx"
+                        else:
+                            # Single address - keep original name
+                            new_name = f"{base_name}.xlsx"
+
+                        dest_path = self.output_dir / new_name
+
+                        # Perform replacement
+                        logger.info(f"Processing: {file_path.name} -> {new_name} (license: {license_num}, address: {address_key})")
+                        success = self._copy_file_with_replacement(file_path, dest_path, replacement_data)
+
+                        if success:
+                            results[file_path.name] = str(dest_path)
+                            logger.info(f"Successfully processed: {new_name}")
+                            self.copied_files_count += 1
+                        else:
+                            logger.error(f"Failed to process: {new_name}")
 
                 except Exception as e:
                     logger.error(f"Error processing {file_path_str}: {e}")
@@ -1044,7 +1212,7 @@ class ReportManager:
             logger.info(f"Processing complete. Successfully processed {len(results)} files")
 
             # Report unprocessed licenses if any
-            self._report_unprocessed_licenses(license_data_map, results)
+            self._report_unprocessed_licenses_new(license_data_map, results)
 
         except Exception as e:
             logger.error(f"Error in _copy_found_reports_with_replacement: {e}")

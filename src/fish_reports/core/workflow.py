@@ -339,11 +339,16 @@ class FishReportsWorkflow:
     def _clear_directories(self):
         """Clear intermediate and output directories before processing."""
         try:
-            # Clear intermediate directory
+            # Clear intermediate directory (but preserve source file if it's there)
             if self.intermediate_dir and self.intermediate_dir.exists():
                 self._log_info("Очищаем директорию промежуточных файлов...")
+                source_file_name = self.source_file.name if self.source_file else None
                 for file_path in self.intermediate_dir.glob("*"):
                     if file_path.is_file():
+                        # Don't delete the source file if it's in intermediate directory
+                        if source_file_name and file_path.name == source_file_name:
+                            self._log_info(f"Пропускаем исходный файл: {file_path.name}")
+                            continue
                         file_path.unlink()
                 self._log_info("Директория промежуточных файлов очищена")
 
