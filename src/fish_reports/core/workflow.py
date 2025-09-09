@@ -5,7 +5,9 @@ Core workflow for Fish Reports processing.
 import logging
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
 
 from ..data.file_processor import FileProcessor
 from ..data.report_manager import ReportManager
@@ -271,6 +273,11 @@ class FishReportsWorkflow:
         # Log detailed statistics
         self.report_manager.log_detailed_statistics()
 
+        # NEW: Remove processed licenses from intermediate file
+        if intermediate_file and intermediate_file.exists():
+            processed_licenses = list(found_reports.keys())
+            self._remove_processed_licenses_from_intermediate_file(intermediate_file, processed_licenses)
+
         self._log_info(f"Скопировано отчетов для {len(found_reports)} лицензий")
         return True
 
@@ -362,3 +369,73 @@ class FishReportsWorkflow:
 
         except Exception as e:
             self._log_error(f"Ошибка при очистке директорий: {e}")
+
+    def _remove_processed_licenses_from_intermediate_file(self, intermediate_file: Path, processed_licenses: List[str]):
+        """
+        Remove processed licenses from intermediate file, keeping only unprocessed ones.
+
+        Args:
+            intermediate_file: Path to the intermediate Excel file
+            processed_licenses: List of license numbers that were successfully processed
+        """
+        try:
+            self._log_info("Удаляем обработанные лицензии из промежуточного файла...")
+
+            # Load the intermediate file
+            df = pd.read_excel(intermediate_file)
+
+            # Get license column name
+            license_col = self.file_processor.COLUMN_MAPPING['business_license']
+
+            if license_col not in df.columns:
+                self._log_error(f"Колонка лицензий '{license_col}' не найдена в промежуточном файле")
+                return
+
+            # Convert processed licenses to strings for comparison
+            processed_licenses_str = [str(lic) for lic in processed_licenses]
+
+            # Log initial state
+            initial_count = len(df)
+            self._log_info(f"Исходное количество строк в промежуточном файле: {initial_count}")
+            self._log_info(f"Обработано лицензий: {len(processed_licenses)}")
+
+            # Filter out processed licenses
+            # Convert license column to string for proper comparison
+            df[license_col] = df[license_col].astype(str)
+
+            # Create mask for rows to keep (unprocessed licenses)
+            mask = ~df[license_col].isin(processed_licenses_str)
+            filtered_df = df[mask]
+
+            # Log results
+            remaining_count = len(filtered_df)
+            removed_count = initial_count - remaining_count
+
+            self._log_info(f"Удалено строк: {removed_count}")
+            self._log_info(f"Осталось строк: {remaining_count}")
+
+            if remaining_count > 0:
+                # Save updated intermediate file
+                filtered_df.to_excel(intermediate_file, index=False)
+                self._log_info(f"Обновленный промежуточный файл сохранен: {intermediate_file}")
+
+                # Log unprocessed licenses
+                unprocessed_licenses = filtered_df[license_col].unique()
+                self._log_info(f"Необработанные лицензии ({len(unprocessed_licenses)}): {', '.join(unprocessed_licenses)}")
+            else:
+                # If no rows left, create empty file or backup
+                self._log_warning("Все лицензии были обработаны - промежуточный файл пуст")
+                # Create backup of original file
+                backup_file = intermediate_file.parent / f"{intermediate_file.stem}_backup{intermediate_file.suffix}"
+                df.to_excel(backup_file, index=False)
+                self._log_info(f"Создан бэкап оригинального файла: {backup_file}")
+
+                # Create empty file with same structure
+                empty_df = pd.DataFrame(columns=df.columns)
+                empty_df.to_excel(intermediate_file, index=False)
+                self._log_info("Создан пустой промежуточный файл")
+
+        except Exception as e:
+            self._log_error(f"Ошибка при удалении обработанных лицензий из промежуточного файла: {e}")
+            # Don't fail the entire process if this cleanup fails
+            self._log_warning("Обработка продолжена несмотря на ошибку очистки промежуточного файла")
