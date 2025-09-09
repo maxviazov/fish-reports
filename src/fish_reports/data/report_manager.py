@@ -13,24 +13,33 @@ from typing import Dict, List, Optional, Union
 import openpyxl
 import pandas as pd
 
+from ..utils import CityManager
+
 logger = logging.getLogger(__name__)
 
 
 class ReportManager:
     """Manages report files and data replacement operations."""
 
-    def __init__(self, base_dir: Path, output_dir: Path):
+    def __init__(self, base_dir: Path, output_dir: Path, city_manager=None):
         """
         Initialize the report manager.
 
         Args:
             base_dir: Base directory for the project
             output_dir: Directory for output files
+            city_manager: CityManager instance for city validation
         """
         self.base_dir = Path(base_dir)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.copied_files_count = 0
+
+        # Initialize city manager for city validation
+        if city_manager:
+            self.city_manager = city_manager
+        else:
+            self.city_manager = CityManager()
 
     def process_reports(self, reports_dir: Path, intermediate_file: Path) -> Dict[str, str]:
         """
@@ -85,16 +94,29 @@ class ReportManager:
                 logger.warning(f"No report files found for license: {license_num}")
                 continue
 
-            # Sort addresses by full address for consistent ordering
-            data_list.sort(key=lambda x: x[1].get('address_key', ''))
-
             # Process each address combination
             for idx, (unique_key, replacement_data) in enumerate(data_list):
                 address_key = replacement_data.get('address_key', 'no_address')
                 logger.info(f"Processing address combination {idx+1}/{len(data_list)}: {address_key}")
 
+                # Extract city code from address for validation
+                expected_city_code = self._extract_city_code_from_address(replacement_data.get('כתובת', ''))
+
+                # Filter files by city if we have multiple files and a city code
+                if len(license_files) > 1 and expected_city_code:
+                    logger.info(f"Multiple files found for license {license_num}, filtering by city code: {expected_city_code}")
+                    filtered_files = self._filter_files_by_city(license_files, expected_city_code)
+
+                    if not filtered_files:
+                        logger.warning(f"No files match city code {expected_city_code} for license {license_num}, using all files")
+                        filtered_files = license_files
+                else:
+                    filtered_files = license_files
+
+                logger.info(f"Using {len(filtered_files)} file(s) for license {license_num}, address: {address_key}")
+
                 # For each file and each address, create a separate output file
-                for file_path in license_files:
+                for file_path in filtered_files:
                     try:
                         # Create unique output filename
                         base_name = file_path.stem
@@ -131,9 +153,108 @@ class ReportManager:
 
         return results
 
+    def _extract_city_from_report(self, file_path: Path) -> Optional[str]:
+        """
+        Extract city code from a report file.
+
+        Args:
+            file_path: Path to the report file
+
+        Returns:
+            City code as string, or None if not found
+        """
+        try:
+            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            for ws in wb.worksheets:
+                for row in ws.iter_rows(values_only=True):
+                    for cell in row:
+                        if cell and isinstance(cell, str):
+                            # Look for city code patterns (typically 2-3 digits)
+                            city_match = re.search(r'\b(\d{2,3})\b', cell)
+                            if city_match:
+                                city_code = city_match.group(1)
+                                # Validate that this is actually a city code
+                                if self.city_manager.is_valid_city_code(city_code):
+                                    wb.close()
+                                    return city_code
+            wb.close()
+        except Exception as e:
+            logger.debug(f"Error extracting city from {file_path}: {e}")
+
+        return None
+
+    def _filter_files_by_city(self, file_paths: List[Path], expected_city_code: str) -> List[Path]:
+        """
+        Filter report files by city code to ensure correct city matching.
+
+        Args:
+            file_paths: List of file paths to filter
+            expected_city_code: Expected city code from address data
+
+        Returns:
+            Filtered list of file paths that match the expected city
+        """
+        if not expected_city_code:
+            logger.info("No city code provided for filtering, returning all files")
+            return file_paths
+
+        filtered_files = []
+        logger.info(f"Filtering {len(file_paths)} files for city code: {expected_city_code}")
+
+        for file_path in file_paths:
+            try:
+                report_city_code = self._extract_city_from_report(file_path)
+                if report_city_code:
+                    if report_city_code == expected_city_code:
+                        filtered_files.append(file_path)
+                        logger.info(f"File {file_path.name} matches city code {expected_city_code}")
+                    else:
+                        logger.info(f"File {file_path.name} has city code {report_city_code}, expected {expected_city_code} - excluded")
+                else:
+                    logger.warning(f"Could not extract city code from {file_path.name}, including in results")
+                    filtered_files.append(file_path)
+            except Exception as e:
+                logger.error(f"Error processing {file_path.name} for city validation: {e}")
+                # Include file if we can't validate it
+                filtered_files.append(file_path)
+
+        logger.info(f"City filtering complete: {len(filtered_files)}/{len(file_paths)} files match")
+        return filtered_files
+
+    def _extract_city_code_from_address(self, full_address: str) -> Optional[str]:
+        """
+        Extract city code from a full address string.
+
+        Args:
+            full_address: Full address string (e.g., "אשדוד, העצמאות 87")
+
+        Returns:
+            City code as string, or None if not found
+        """
+        if not full_address or not isinstance(full_address, str):
+            return None
+
+        # Try to extract city name from address (before comma)
+        if ',' in full_address:
+            city_part = full_address.split(',')[0].strip()
+            logger.info(f"Extracted city name from address: '{city_part}'")
+
+            # Get city code from city manager
+            city_code = self.city_manager.get_city_code_by_name(city_part)
+            if city_code:
+                logger.info(f"Found city code {city_code} for city '{city_part}'")
+                return city_code
+            else:
+                logger.debug(f"City '{city_part}' not found in city database")
+        else:
+            logger.debug(f"No comma found in address '{full_address}', cannot extract city")
+
+        return None
+
     def _find_files_for_license(self, reports_dir: Path, license_num: str) -> List[Path]:
         """
         Find all report files that contain the given license number.
+        Now supports city validation when multiple files are found.
 
         Args:
             reports_dir: Directory to search for report files

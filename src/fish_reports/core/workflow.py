@@ -11,6 +11,7 @@ import pandas as pd
 
 from ..data.file_processor import FileProcessor
 from ..data.report_manager import ReportManager
+from ..utils import CityManager
 from ..utils.file_utils import create_directory_if_not_exists, validate_file_path
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ class FishReportsWorkflow:
         """
         self.gui_callback = gui_callback
         self.file_processor = FileProcessor()
+        self.city_manager = CityManager()
         self.report_manager = None
 
         # Paths
@@ -76,7 +78,7 @@ class FishReportsWorkflow:
             self.output_dir = output_dir
 
             # Initialize report manager
-            self.report_manager = ReportManager(reports_dir, output_dir)
+            self.report_manager = ReportManager(reports_dir, output_dir, self.city_manager)
 
             self._log_info("Все пути успешно установлены")
             return True

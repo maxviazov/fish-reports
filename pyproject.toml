@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fish-reports-dolina"
-version = "0.0.1"
+version = "0.0.2"
 description = "Система обработки отчетов о рыбе для Министерства здравоохранения Израиля"
 authors = [{name = "Max Viazov", email = "max@example.com"}]
 license = {text = "MIT"}
