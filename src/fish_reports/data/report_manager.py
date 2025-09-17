@@ -806,11 +806,7 @@ class ReportManager:
                                         cell.data_type = 'n'
                                         cell.number_format = 'General'
 
-                                        # Применяем правильный шрифт как в оригинальном файле
-                                        from openpyxl.styles import Font
-                                        cell.font = Font(name='Arial', size=9)
-
-                                        # Убеждаемся, что значение сохранено правильно
+                                        # Убираем форматирование шрифта - министерство хочет только чистые значения
                                         logger.info(f"Установлено значение веса: {cell.value} (тип: {type(cell.value)})")
 
                                         # Дополнительная проверка - если значение все еще не число, конвертируем
@@ -832,10 +828,6 @@ class ReportManager:
                                         cell.value = float(numeric_value)
                                         cell.data_type = 'n'
                                         cell.number_format = 'General'
-
-                                        # Применяем правильный шрифт как в оригинальном файле
-                                        from openpyxl.styles import Font
-                                        cell.font = Font(name='Arial', size=9)
                                         logger.info(f"Установлено значение общего веса: {cell.value} (тип: {type(cell.value)})")
                                         logger.info(f"Заменено поле общего веса с '{old_value}' на {numeric_value} (число)")
                                     # Специальная обработка для поля количества (аризות)
@@ -848,10 +840,6 @@ class ReportManager:
                                         cell.value = float(numeric_value)  # Оставляем как float, как в оригинале
                                         cell.data_type = 'n'
                                         cell.number_format = 'General'
-
-                                        # Применяем правильный шрифт как в оригинальном файле
-                                        from openpyxl.styles import Font
-                                        cell.font = Font(name='Arial', size=9)
 
                                         # Убеждаемся, что значение сохранено правильно
                                         logger.info(f"Установлено значение количества: {cell.value} (тип: {type(cell.value)})")
@@ -873,23 +861,14 @@ class ReportManager:
                                             cell.number_format = 'General'  # Используем General вместо 0.0
                                             cell.data_type = 'n'  # Явно указываем тип данных как число
                                             cell.style = 'Normal'  # Сбрасываем стиль
-                                            # Применяем Arial шрифт для числовых полей
-                                            from openpyxl.styles import Font
-                                            cell.font = Font(name='Arial', size=9)
                                         elif target_col in ['מוצרים מוכנים לאכילה']:
                                             cell.number_format = 'General'  # Используем General вместо 0.0
                                             cell.data_type = 'n'  # Явно указываем тип данных как число
                                             cell.style = 'Normal'  # Сбрасываем стиль
-                                            # Применяем Arial шрифт для числовых полей
-                                            from openpyxl.styles import Font
-                                            cell.font = Font(name='Arial', size=9)
                                         else:
                                             cell.number_format = '0'  # Целый формат для других числовых полей
                                             cell.data_type = 'n'  # Явно указываем тип данных как число
                                             cell.style = 'Normal'  # Сбрасываем стиль
-                                            # Применяем Arial шрифт для числовых полей
-                                            from openpyxl.styles import Font
-                                            cell.font = Font(name='Arial', size=9)
                                         logger.info(f"Заменено в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{old_value}' -> {numeric_value} (число)")
                                     else:
                                         logger.info(f"Пропущено нулевое значение в столбце '{target_col}' - оставлено: '{old_value}'")
@@ -958,9 +937,6 @@ class ReportManager:
                 value_cell.value = float(weight_value)
                 value_cell.number_format = 'General'  # Используем General вместо 0.0
                 value_cell.data_type = 'n'
-                # Применяем Arial шрифт
-                from openpyxl.styles import Font
-                value_cell.font = Font(name='Arial', size=9)
                 logger.info(f"Добавлено поле веса 'מוצרים מוכנים לאכילה' со значением {weight_value} в строку {new_row_idx}")
                 fields_added += 1
 
@@ -989,9 +965,6 @@ class ReportManager:
                 value_cell.value = float(quantity_value)
                 value_cell.number_format = 'General'  # Используем General вместо 0.0
                 value_cell.data_type = 'n'
-                # Применяем Arial шрифт
-                from openpyxl.styles import Font
-                value_cell.font = Font(name='Arial', size=9)
                 logger.info(f"Добавлено поле количества 'סה\"כ קרטונים' со значением {quantity_value} в строку {new_row_idx}")
                 fields_added += 1
 
@@ -1093,9 +1066,6 @@ class ReportManager:
                                         value_cell.value = numeric_value
                                         value_cell.number_format = 'General'  # Используем General вместо 0.0
                                         value_cell.data_type = 'n'
-                                        # Применяем Arial шрифт
-                                        from openpyxl.styles import Font
-                                        value_cell.font = Font(name='Arial', size=9)
                                         logger.info(f"Заменено числовое поле '{search_field}' с '{old_value}' на {numeric_value} (число)")
                                     except (ValueError, TypeError):
                                         value_cell.value = replacement['replace_value']
