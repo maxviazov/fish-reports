@@ -552,6 +552,7 @@ class ReportManager:
             # Client information
             'שם כרטיס': 'שם כרטיס',
             'שם לועזי': 'שם לועזי',
+            'לקוח': 'שם לועזי',  # Final report field -> intermediate data
             'כתובת': 'כתובת',
         }
 
@@ -618,6 +619,14 @@ class ReportManager:
                 'target_column': 'מספר תעודת משלוח',
                 'search_fields': ['מספר תעודת משלוח', 'אסמכתת בסיס'],
                 'replace_value': replacement_data.get('אסמכתת בסיס', ''),
+                'is_numeric': False  # Это текстовое поле
+            },
+            # שם לועזי -> לקוח (имя клиента на латинице)
+            {
+                'intermediate_field': 'שם לועזי',
+                'target_column': 'לקוח',
+                'search_fields': ['לקוח', 'לקוח', 'client', 'שם לקוח'],
+                'replace_value': replacement_data.get('שם לועזי', ''),
                 'is_numeric': False  # Это текстовое поле
             },
             # סה'כ משקל -> מוצרים מוכנים לאכילה
