@@ -552,8 +552,10 @@ class ReportManager:
             # Client information
             'שם כרטיס': 'שם כרטיס',
             'שם לועזי': 'שם לועזי',
-            'לקוח': 'שם לועזי',  # Final report field -> intermediate data
             'כתובת': 'כתובת',
+            # Map client name into final 'לקוח' column ONLY (user requirement)
+            'לקוח': 'שם לועזי',
+            # Лицензионное поле НЕ трогаем вообще – убрано из маппинга специально
         }
 
         return field_mappings
@@ -621,13 +623,16 @@ class ReportManager:
                 'replace_value': replacement_data.get('אסמכתת בסיס', ''),
                 'is_numeric': False  # Это текстовое поле
             },
-            # שם לועזי -> לקוח (имя клиента на латинице)
+            # שם לועזי -> לקוח (единственное требуемое пользователем сопоставление клиентского имени)
             {
                 'intermediate_field': 'שם לועזי',
                 'target_column': 'לקוח',
-                'search_fields': ['לקוח', 'לקוח', 'client', 'שם לקוח'],
+                # ВАЖНО: используем только точный заголовок колонки 'לקוח'.
+                # НЕЛЬЗЯ матчить подстроку 'לקוח' внутри длинного поля лицензии,
+                # иначе имя клиента затирает номер лицензии.
+                'search_fields': ['לקוח'],
                 'replace_value': replacement_data.get('שם לועזי', ''),
-                'is_numeric': False  # Это текстовое поле
+                'is_numeric': False  # Текстовое поле (имя клиента)
             },
             # סה'כ משקל -> מוצרים מוכנים לאכילה
             {
@@ -695,6 +700,26 @@ class ReportManager:
         # Log worksheet info for debugging
         logger.info(f"Анализируем лист '{worksheet.title}' с {worksheet.max_row} строками и {worksheet.max_column} колонками")
 
+        # ЗАЩИТА: если в шаблоне НЕТ отдельного столбца 'לקוח', полностью убираем этот mapping,
+        # чтобы не перезаписать значение лицензии из-за подстрочного совпадения.
+        try:
+            has_exact_client_header = False
+            scan_rows = min(10, worksheet.max_row)
+            for row in worksheet.iter_rows(min_row=1, max_row=scan_rows):
+                for cell in row:
+                    if cell.value is not None and str(cell.value).strip() == 'לקוח':
+                        has_exact_client_header = True
+                        break
+                if has_exact_client_header:
+                    break
+            if not has_exact_client_header:
+                original_len = len(field_replacements)
+                field_replacements = [fr for fr in field_replacements if fr.get('target_column') != 'לקוח']
+                if len(field_replacements) != original_len:
+                    logger.info("Столбец 'לקוח' не найден (точное совпадение). Mapping клиента отключен, лицензия не будет затронута.")
+        except Exception as e:
+            logger.warning(f"Не удалось выполнить проверку наличия столбца 'לקוח': {e}")
+
         # Сначала найдем номера столбцов по их названиям
         column_mapping = {}
         header_row = None
@@ -705,7 +730,18 @@ class ReportManager:
             if len(row_cells) >= 3:  # Минимум 3 колонки
                 # Проверяем, есть ли в строке названия наших целевых столбцов
                 row_text = ' '.join([str(cell.value) if cell.value is not None else '' for cell in row_cells])
-                has_target_columns = any(target_col in row_text for replacement in field_replacements for target_col in [replacement['target_column']])
+                # Для 'לקוח' требуем точное совпадение отдельной ячейки, а не подстроку
+                has_target_columns = False
+                for replacement in field_replacements:
+                    target_col = replacement['target_column']
+                    if target_col == 'לקוח':
+                        if any((cell.value is not None and str(cell.value).strip() == 'לקוח') for cell in row_cells):
+                            has_target_columns = True
+                    else:
+                        if target_col in row_text:
+                            has_target_columns = True
+                    if has_target_columns:
+                        break
 
                 if has_target_columns:
                     header_row = row_idx
@@ -713,14 +749,19 @@ class ReportManager:
 
                     # Определяем номера столбцов
                     for col_idx, cell in enumerate(row_cells, 1):
-                        if cell.value is not None:
-                            cell_value = str(cell.value)
-                            for replacement in field_replacements:
-                                target_col = replacement['target_column']
-                                # Handle Hebrew special characters
+                        if cell.value is None:
+                            continue
+                        cell_value = str(cell.value).strip()
+                        for replacement in field_replacements:
+                            target_col = replacement['target_column']
+                            # Точное сопоставление для 'לקוח'
+                            if target_col == 'לקוח':
+                                if cell_value == 'לקוח':
+                                    column_mapping[target_col] = col_idx
+                                    logger.info(f"Столбец 'לקוח' (точное совпадение) найден в колонке {col_idx}")
+                            else:
                                 normalized_cell = cell_value.replace('"', "'").replace('״', "'")
                                 normalized_target = target_col.replace('"', "'").replace('״', "'")
-
                                 if target_col in cell_value or normalized_target in normalized_cell:
                                     column_mapping[target_col] = col_idx
                                     logger.info(f"Столбец '{target_col}' найден в колонке {col_idx}")
@@ -806,6 +847,10 @@ class ReportManager:
                                         cell.data_type = 'n'
                                         cell.number_format = 'General'
 
+                                        # Применяем правильный шрифт как в оригинальном файле
+                                        from openpyxl.styles import Font
+                                        cell.font = Font(name='Arial', size=9)
+
                                         # Убираем форматирование шрифта - министерство хочет только чистые значения
                                         logger.info(f"Установлено значение веса: {cell.value} (тип: {type(cell.value)})")
 
@@ -828,6 +873,11 @@ class ReportManager:
                                         cell.value = float(numeric_value)
                                         cell.data_type = 'n'
                                         cell.number_format = 'General'
+
+                                        # Применяем правильный шрифт как в оригинальном файле
+                                        from openpyxl.styles import Font
+                                        cell.font = Font(name='Arial', size=9)
+
                                         logger.info(f"Установлено значение общего веса: {cell.value} (тип: {type(cell.value)})")
                                         logger.info(f"Заменено поле общего веса с '{old_value}' на {numeric_value} (число)")
                                     # Специальная обработка для поля количества (аризות)
@@ -840,6 +890,10 @@ class ReportManager:
                                         cell.value = float(numeric_value)  # Оставляем как float, как в оригинале
                                         cell.data_type = 'n'
                                         cell.number_format = 'General'
+
+                                        # Применяем правильный шрифт как в оригинальном файле
+                                        from openpyxl.styles import Font
+                                        cell.font = Font(name='Arial', size=9)
 
                                         # Убеждаемся, что значение сохранено правильно
                                         logger.info(f"Установлено значение количества: {cell.value} (тип: {type(cell.value)})")
@@ -861,14 +915,23 @@ class ReportManager:
                                             cell.number_format = 'General'  # Используем General вместо 0.0
                                             cell.data_type = 'n'  # Явно указываем тип данных как число
                                             cell.style = 'Normal'  # Сбрасываем стиль
+                                            # Применяем Arial шрифт для числовых полей
+                                            from openpyxl.styles import Font
+                                            cell.font = Font(name='Arial', size=9)
                                         elif target_col in ['מוצרים מוכנים לאכילה']:
                                             cell.number_format = 'General'  # Используем General вместо 0.0
                                             cell.data_type = 'n'  # Явно указываем тип данных как число
                                             cell.style = 'Normal'  # Сбрасываем стиль
+                                            # Применяем Arial шрифт для числовых полей
+                                            from openpyxl.styles import Font
+                                            cell.font = Font(name='Arial', size=9)
                                         else:
                                             cell.number_format = '0'  # Целый формат для других числовых полей
                                             cell.data_type = 'n'  # Явно указываем тип данных как число
                                             cell.style = 'Normal'  # Сбрасываем стиль
+                                            # Применяем Arial шрифт для числовых полей
+                                            from openpyxl.styles import Font
+                                            cell.font = Font(name='Arial', size=9)
                                         logger.info(f"Заменено в столбце '{target_col}' (колонка {col_idx}, строка {data_row_idx}): '{old_value}' -> {numeric_value} (число)")
                                     else:
                                         logger.info(f"Пропущено нулевое значение в столбце '{target_col}' - оставлено: '{old_value}'")
@@ -937,6 +1000,9 @@ class ReportManager:
                 value_cell.value = float(weight_value)
                 value_cell.number_format = 'General'  # Используем General вместо 0.0
                 value_cell.data_type = 'n'
+                # Применяем Arial шрифт
+                from openpyxl.styles import Font
+                value_cell.font = Font(name='Arial', size=9)
                 logger.info(f"Добавлено поле веса 'מוצרים מוכנים לאכילה' со значением {weight_value} в строку {new_row_idx}")
                 fields_added += 1
 
@@ -965,6 +1031,9 @@ class ReportManager:
                 value_cell.value = float(quantity_value)
                 value_cell.number_format = 'General'  # Используем General вместо 0.0
                 value_cell.data_type = 'n'
+                # Применяем Arial шрифт
+                from openpyxl.styles import Font
+                value_cell.font = Font(name='Arial', size=9)
                 logger.info(f"Добавлено поле количества 'סה\"כ קרטונים' со значением {quantity_value} в строку {new_row_idx}")
                 fields_added += 1
 
@@ -1066,6 +1135,9 @@ class ReportManager:
                                         value_cell.value = numeric_value
                                         value_cell.number_format = 'General'  # Используем General вместо 0.0
                                         value_cell.data_type = 'n'
+                                        # Применяем Arial шрифт
+                                        from openpyxl.styles import Font
+                                        value_cell.font = Font(name='Arial', size=9)
                                         logger.info(f"Заменено числовое поле '{search_field}' с '{old_value}' на {numeric_value} (число)")
                                     except (ValueError, TypeError):
                                         value_cell.value = replacement['replace_value']

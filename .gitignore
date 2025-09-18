@@ -185,4 +185,7 @@ temp/
 *.xlsx
 *.xls
 *.csv
+# Allow tracked Python source files inside src/fish_reports/data despite generic data/ ignore
+!src/fish_reports/data/
+!src/fish_reports/data/*.py
 !sample_data.*
