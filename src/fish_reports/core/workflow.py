@@ -242,6 +242,7 @@ class FishReportsWorkflow:
         # First try searching by content (more accurate)
         self._log_info("Поиск отчетов по содержимому файлов...")
         found_reports = self.report_manager.search_reports_by_content(business_licenses)
+        self._log_info(f"Найдено по содержимому: {len(found_reports)} файлов")
 
         # If no reports found by content, fallback to filename search
         if not found_reports:
@@ -249,6 +250,7 @@ class FishReportsWorkflow:
             found_reports = self.report_manager.search_reports_by_license(
                 business_licenses
             )
+            self._log_info(f"Найдено по имени файла: {len(found_reports)} файлов")
 
         if not found_reports:
             self._log_warning("Не найдено ни одного отчета")

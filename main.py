@@ -18,14 +18,13 @@ def main():
     # Create workflow instance
     workflow = FishReportsWorkflow()
 
-    # Set test paths
-    base_dir = Path(__file__).parent
-    source_file = base_dir / "tmp" / "filtered_data.xlsx"
-    intermediate_dir = base_dir / "tmp"
-    reports_dir = base_dir / "test_reports"
-    output_dir = base_dir / "output"
+    # Set test paths - using same paths as GUI
+    source_file = Path(r"C:\Users\office3\Desktop\FishKA\source\משקל.xlsx")
+    intermediate_dir = Path(r"C:\Users\office3\Desktop\FishKA\filtered")
+    reports_dir = Path(r"C:\Users\office3\Desktop\FishKA\משרד הבריאות")
+    output_dir = Path(r"C:\Users\office3\Desktop\FishKA\final")
 
-    print("🐟 Запуск Fish Reports System...")
+    print("Запуск Fish Reports System...")
     print("=" * 40)
 
     # Set paths
@@ -35,17 +34,17 @@ def main():
 
     # Process files
     if workflow.process_files():
-        print("✅ Обработка завершена успешно!")
+        print("Обработка завершена успешно!")
         results = workflow.get_results()
         if results:
-            print("\n📊 Результаты:")
+            print("\nРезультаты:")
             print(f"• Обработано строк: {results.get('total_rows', 0)}")
             print(f"• Общий вес (кг): {results.get('total_weight_kg', 0):.2f}")
             print(f"• Общее количество упаковок: {results.get('total_packages', 0)}")
             print(f"• Найдено лицензий: {results.get('unique_licenses', 0)}")
             print(f"• Скопировано файлов отчетов: {results.get('total_files', 0)}")
     else:
-        print("❌ Ошибка при обработке файлов")
+        print("Ошибка при обработке файлов")
         sys.exit(1)
 
 if __name__ == "__main__":
