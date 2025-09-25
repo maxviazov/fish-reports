@@ -484,23 +484,77 @@ class ReportManager:
             True if successful, False otherwise
         """
         try:
-            # Load workbook
-            workbook = openpyxl.load_workbook(source_path)
+            logger.info(f"Starting file copy: {source_path} -> {dest_path}")
+
+            # Load workbook with error handling
+            try:
+                logger.info(f"Loading workbook: {source_path}")
+                # Try different loading options for compatibility with updated Office
+                try:
+                    workbook = openpyxl.load_workbook(source_path)
+                except Exception as load_error:
+                    logger.warning(f"Standard load failed, trying with data_only=True: {load_error}")
+                    try:
+                        workbook = openpyxl.load_workbook(source_path, data_only=True)
+                    except Exception as data_only_error:
+                        logger.warning(f"data_only load failed, trying read_only=True: {data_only_error}")
+                        workbook = openpyxl.load_workbook(source_path, read_only=True)
+                        # Convert to editable workbook
+                        from openpyxl import Workbook
+                        editable_wb = Workbook()
+                        # Copy sheets
+                        for sheet_name in workbook.sheetnames:
+                            source_sheet = workbook[sheet_name]
+                            target_sheet = editable_wb.create_sheet(sheet_name)
+                            for row_idx, row in enumerate(source_sheet.iter_rows(), 1):
+                                for col_idx, cell in enumerate(row, 1):
+                                    target_sheet.cell(row=row_idx, column=col_idx, value=cell.value)
+                        # Remove default sheet if it exists
+                        if 'Sheet' in editable_wb.sheetnames:
+                            editable_wb.remove(editable_wb['Sheet'])
+                        workbook.close()
+                        workbook = editable_wb
+                        logger.info("Converted read-only workbook to editable")
+
+                logger.info(f"Workbook loaded successfully: {len(workbook.sheetnames)} sheets")
+            except Exception as e:
+                logger.error(f"Failed to load workbook {source_path} with all methods: {e}")
+                logger.error(f"Error type: {type(e).__name__}")
+                return False
 
             # Get field mappings for this file type
             field_mappings = self._get_field_mappings()
 
             # Process each worksheet
             for sheet_name in workbook.sheetnames:
-                worksheet = workbook[sheet_name]
-                self._replace_fields_in_worksheet(worksheet, replacement_data, field_mappings)
+                try:
+                    logger.info(f"Processing sheet: {sheet_name}")
+                    worksheet = workbook[sheet_name]
+                    self._replace_fields_in_worksheet(worksheet, replacement_data, field_mappings)
+                    logger.info(f"Sheet {sheet_name} processed successfully")
+                except Exception as e:
+                    logger.error(f"Error processing sheet {sheet_name}: {e}")
+                    # Continue with other sheets instead of failing completely
+                    continue
 
-            # Save to destination
-            workbook.save(dest_path)
+            # Save to destination with error handling
+            try:
+                logger.info(f"Saving workbook to: {dest_path}")
+                # Ensure destination directory exists
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+                workbook.save(dest_path)
+                logger.info(f"Workbook saved successfully to: {dest_path}")
+            except Exception as e:
+                logger.error(f"Failed to save workbook to {dest_path}: {e}")
+                logger.error(f"Error type: {type(e).__name__}")
+                workbook.close()
+                return False
+
             workbook.close()
 
             # Verify the file was saved correctly
-            logger.info(f"Файл сохранен: {dest_path}")
+            logger.info(f"Verifying saved file: {dest_path}")
             try:
                 # Quick verification - try to read back the file
                 verify_wb = openpyxl.load_workbook(dest_path, data_only=True)
@@ -524,11 +578,15 @@ class ReportManager:
                 logger.info("Файл успешно сохранен и проверен")
             except Exception as e:
                 logger.error(f"Ошибка при проверке сохраненного файла: {e}")
+                # Don't fail the operation if verification fails, just log it
 
             return True
 
         except Exception as e:
             logger.error(f"Error copying file with replacement: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
     def _get_field_mappings(self) -> Dict[str, str]:
